@@ -41,6 +41,8 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+VALID_ROLES = ["student", "health_staff"]
+
 
 # --- demo staff directory -----------------------------------------------
 # Replace with a real users table. Passwords below are bcrypt hashes of
