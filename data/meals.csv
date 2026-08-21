@@ -1,0 +1,81 @@
+meal_id,mess,date,meal_type,food_items
+1,MESS_A,2026-08-12,breakfast,upma;coconut chutney;coffee
+2,MESS_A,2026-08-12,lunch,rice;sambar;potato fry;curd;pickle
+3,MESS_A,2026-08-12,snacks,biscuits;tea
+4,MESS_A,2026-08-12,dinner,chapati;egg curry;rice;salad
+5,MESS_B,2026-08-12,breakfast,idli;sambar;coconut chutney;tea
+6,MESS_B,2026-08-12,lunch,rice;dal;mixed vegetable curry;curd;papad
+7,MESS_B,2026-08-12,snacks,sandwich;coffee
+8,MESS_B,2026-08-12,dinner,chicken curry;rice;chapati;salad
+9,MESS_A,2026-08-13,breakfast,upma;coconut chutney;coffee
+10,MESS_A,2026-08-13,lunch,chapati;paneer curry;rice;dal fry
+11,MESS_A,2026-08-13,snacks,sandwich;coffee
+12,MESS_A,2026-08-13,dinner,rice;dal;paneer curry;salad;chapati
+13,MESS_B,2026-08-13,breakfast,upma;coconut chutney;coffee
+14,MESS_B,2026-08-13,lunch,rice;sambar;potato fry;curd;pickle
+15,MESS_B,2026-08-13,snacks,sandwich;coffee
+16,MESS_B,2026-08-13,dinner,fried rice;manchurian gravy;salad
+17,MESS_A,2026-08-14,breakfast,bread;butter;jam;cornflakes;milk
+18,MESS_A,2026-08-14,lunch,rice;dal;mixed vegetable curry;curd;papad
+19,MESS_A,2026-08-14,snacks,sandwich;coffee
+20,MESS_A,2026-08-14,dinner,chicken curry;rice;chapati;salad
+21,MESS_B,2026-08-14,breakfast,upma;coconut chutney;coffee
+22,MESS_B,2026-08-14,lunch,chapati;paneer curry;rice;dal fry
+23,MESS_B,2026-08-14,snacks,sandwich;coffee
+24,MESS_B,2026-08-14,dinner,rice;dal;paneer curry;salad;chapati
+25,MESS_A,2026-08-15,breakfast,upma;coconut chutney;coffee
+26,MESS_A,2026-08-15,lunch,chapati;paneer curry;rice;dal fry
+27,MESS_A,2026-08-15,snacks,biscuits;tea
+28,MESS_A,2026-08-15,dinner,rice;dal;paneer curry;salad;chapati
+29,MESS_B,2026-08-15,breakfast,upma;coconut chutney;coffee
+30,MESS_B,2026-08-15,lunch,chapati;paneer curry;rice;dal fry
+31,MESS_B,2026-08-15,snacks,bread pakora;tea
+32,MESS_B,2026-08-15,dinner,rice;dal;paneer curry;salad;chapati
+33,MESS_A,2026-08-16,breakfast,upma;coconut chutney;coffee
+34,MESS_A,2026-08-16,lunch,rice;dal;mixed vegetable curry;curd;papad
+35,MESS_A,2026-08-16,snacks,samosa;tea
+36,MESS_A,2026-08-16,dinner,rice;rajma;chapati;curd
+37,MESS_B,2026-08-16,breakfast,upma;coconut chutney;coffee
+38,MESS_B,2026-08-16,lunch,rice;dal;mixed vegetable curry;curd;papad
+39,MESS_B,2026-08-16,snacks,samosa;tea
+40,MESS_B,2026-08-16,dinner,rice;dal;paneer curry;salad;chapati
+41,MESS_A,2026-08-17,breakfast,bread;butter;jam;cornflakes;milk
+42,MESS_A,2026-08-17,lunch,chapati;chole;jeera rice;salad
+43,MESS_A,2026-08-17,snacks,biscuits;tea
+44,MESS_A,2026-08-17,dinner,fried rice;manchurian gravy;salad
+45,MESS_B,2026-08-17,breakfast,bread;butter;jam;cornflakes;milk
+46,MESS_B,2026-08-17,lunch,rice;dal;mixed vegetable curry;curd;papad
+47,MESS_B,2026-08-17,snacks,sandwich;coffee
+48,MESS_B,2026-08-17,dinner,rice;rajma;chapati;curd
+49,MESS_A,2026-08-18,breakfast,bread;butter;jam;cornflakes;milk
+50,MESS_A,2026-08-18,lunch,chapati;paneer curry;rice;dal fry
+51,MESS_A,2026-08-18,snacks,bread pakora;tea
+52,MESS_A,2026-08-18,dinner,rice;dal;paneer curry (suspected undercooked);salad;chapati
+53,MESS_B,2026-08-18,breakfast,upma;coconut chutney;coffee
+54,MESS_B,2026-08-18,lunch,rice;dal;mixed vegetable curry;curd;papad
+55,MESS_B,2026-08-18,snacks,samosa;tea
+56,MESS_B,2026-08-18,dinner,chapati;egg curry;rice;salad
+57,MESS_A,2026-08-19,breakfast,idli;sambar;coconut chutney;tea
+58,MESS_A,2026-08-19,lunch,rice;sambar;potato fry;curd;pickle
+59,MESS_A,2026-08-19,snacks,bread pakora;tea
+60,MESS_A,2026-08-19,dinner,fried rice;manchurian gravy;salad
+61,MESS_B,2026-08-19,breakfast,bread;butter;jam;cornflakes;milk
+62,MESS_B,2026-08-19,lunch,rice;dal;mixed vegetable curry;curd;papad
+63,MESS_B,2026-08-19,snacks,samosa;tea
+64,MESS_B,2026-08-19,dinner,chapati;egg curry;rice;salad
+65,MESS_A,2026-08-20,breakfast,upma;coconut chutney;coffee
+66,MESS_A,2026-08-20,lunch,chapati;chole;jeera rice;salad
+67,MESS_A,2026-08-20,snacks,biscuits;tea
+68,MESS_A,2026-08-20,dinner,rice;dal;paneer curry;salad;chapati
+69,MESS_B,2026-08-20,breakfast,bread;butter;jam;cornflakes;milk
+70,MESS_B,2026-08-20,lunch,chapati;chole;jeera rice;salad
+71,MESS_B,2026-08-20,snacks,sandwich;coffee
+72,MESS_B,2026-08-20,dinner,rice;dal;paneer curry;salad;chapati
+73,MESS_A,2026-08-21,breakfast,upma;coconut chutney;coffee
+74,MESS_A,2026-08-21,lunch,chapati;chole;jeera rice;salad
+75,MESS_A,2026-08-21,snacks,biscuits;tea
+76,MESS_A,2026-08-21,dinner,chapati;egg curry;rice;salad
+77,MESS_B,2026-08-21,breakfast,bread;butter;jam;cornflakes;milk
+78,MESS_B,2026-08-21,lunch,rice;dal;mixed vegetable curry;curd;papad
+79,MESS_B,2026-08-21,snacks,biscuits;tea
+80,MESS_B,2026-08-21,dinner,rice;dal;paneer curry;salad;chapati
