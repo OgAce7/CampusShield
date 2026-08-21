@@ -6,10 +6,38 @@ from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
 
+from auth import VALID_ROLES
 from schema import ALL_BLOCKS, FOOD_EXPOSURES, MESS_OPTIONS
 
 SEVERITY_LEVELS = ["mild", "moderate", "severe"]
 MEAL_TYPES = ["breakfast", "lunch", "snacks", "dinner"]
+
+
+# ---------------------------------------------------------------------------
+# Auth (hackathon-simple - see auth.py)
+# ---------------------------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    role: str
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if v not in VALID_ROLES:
+            raise ValueError(f"role must be one of {VALID_ROLES}")
+        return v
+
+
+class LoginResponse(BaseModel):
+    session_token: str
+    name: str
+    role: str
+
+
+class MeResponse(BaseModel):
+    name: str
+    role: str
 
 
 # ---------------------------------------------------------------------------

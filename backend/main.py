@@ -4,27 +4,38 @@ Minimal FastAPI + SQLite skeleton for hackathon project.
 
 Implements:
 - GET /health
-- POST /reports, GET /reports
-- POST /meals, GET /meals
-- GET /blocks
+- POST /login, GET /me (hackathon-simple role auth - see auth.py)
+- POST /reports (student only), GET /reports (clinic only)
+- POST /meals (clinic only), GET /meals (student or clinic)
+- GET /blocks (student or clinic)
 - GET /dashboard/overview, /dashboard/blocks, /dashboard/alerts,
   /dashboard/sources (outbreak detection + source attribution, wired to
   live SQLite data via analysis_bridge.py - see dashboard.py)
 
 Intentionally NOT implemented (future work):
 - notifications
-- authentication
+- real authentication (passwords, JWT, OAuth, DB-backed sessions)
 - real maps / GIS
 """
 
 from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import auth
 import database
 from dashboard import router as dashboard_router
-from models import ReportCreate, ReportOut, MealCreate, MealOut, BlockOut
+from models import (
+    BlockOut,
+    LoginRequest,
+    LoginResponse,
+    MealCreate,
+    MealOut,
+    MeResponse,
+    ReportCreate,
+    ReportOut,
+)
 
 app = FastAPI(
     title="Hostel Outbreak Radar API",
@@ -62,10 +73,36 @@ def root():
 
 
 # ---------------------------------------------------------------------------
+# Auth (hackathon-simple - see auth.py: no passwords, no JWT, in-memory only)
+# ---------------------------------------------------------------------------
+
+@app.post("/login", response_model=LoginResponse)
+def login(credentials: LoginRequest):
+    """
+    Hackathon-simple "login": pick a name and a role, get back an opaque
+    session token. No password. Send the token back on later requests as
+    the X-Session-Token header.
+    """
+    token = auth.create_session(name=credentials.name, role=credentials.role)
+    return LoginResponse(session_token=token, name=credentials.name, role=credentials.role)
+
+
+@app.get("/me", response_model=MeResponse)
+def me(session: dict = Depends(auth.get_current_session)):
+    """Returns the caller's name and role, so the frontend knows which view to render."""
+    return MeResponse(name=session["name"], role=session["role"])
+
+
+# ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
 
-@app.post("/reports", response_model=ReportOut, status_code=201)
+@app.post(
+    "/reports",
+    response_model=ReportOut,
+    status_code=201,
+    dependencies=[Depends(auth.require_role("student"))],
+)
 def create_report(report: ReportCreate):
     now = datetime.now(timezone.utc).isoformat()
     payload = report.model_dump()
@@ -86,7 +123,11 @@ def create_report(report: ReportCreate):
     )
 
 
-@app.get("/reports", response_model=list[ReportOut])
+@app.get(
+    "/reports",
+    response_model=list[ReportOut],
+    dependencies=[Depends(auth.require_role("clinic"))],
+)
 def list_reports():
     return database.get_all_reports()
 
@@ -95,7 +136,12 @@ def list_reports():
 # Meals
 # ---------------------------------------------------------------------------
 
-@app.post("/meals", response_model=MealOut, status_code=201)
+@app.post(
+    "/meals",
+    response_model=MealOut,
+    status_code=201,
+    dependencies=[Depends(auth.require_role("clinic"))],
+)
 def create_meal(meal: MealCreate):
     payload = meal.model_dump()
     meal_id = database.insert_meal(payload)
@@ -109,7 +155,11 @@ def create_meal(meal: MealCreate):
     )
 
 
-@app.get("/meals", response_model=list[MealOut])
+@app.get(
+    "/meals",
+    response_model=list[MealOut],
+    dependencies=[Depends(auth.get_current_session)],
+)
 def list_meals():
     return database.get_all_meals()
 
@@ -118,6 +168,10 @@ def list_meals():
 # Blocks
 # ---------------------------------------------------------------------------
 
-@app.get("/blocks", response_model=list[BlockOut])
+@app.get(
+    "/blocks",
+    response_model=list[BlockOut],
+    dependencies=[Depends(auth.get_current_session)],
+)
 def list_blocks():
     return database.get_all_blocks()
