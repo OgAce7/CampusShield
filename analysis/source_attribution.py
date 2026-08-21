@@ -385,14 +385,20 @@ def compute_exposure_stats(
 # Entry point
 # ---------------------------------------------------------------------------
 
-def attribute_source(
-    reports_csv: str,
+def attribute_source_from_df(
+    reports_df: pd.DataFrame,
     block: str,
-    meals_csv: str | None = None,
+    meals_df: pd.DataFrame | None = None,
     population_scope: str = "campus",
 ) -> dict:
     """
-    Run source attribution for a single block.
+    Run source attribution for a single block against already-loaded
+    DataFrames (reports_df must already have onset_time as datetime - see
+    load_reports for the exact prep; meals_df must already have a
+    `datetime` column - see load_meals). This is the entry point used by
+    callers that source data from something other than a CSV (e.g. the
+    backend's SQLite database) - attribute_source() below is a thin
+    CSV-loading wrapper around this.
 
     Returns a dict with:
       - block
@@ -405,10 +411,7 @@ def attribute_source(
       - summary: short human-readable string, mirroring the example
         format in the project spec
     """
-    reports_df = load_reports(reports_csv)
-    meals_df = load_meals(meals_csv) if meals_csv else None
-
-    if block not in reports_df["block"].unique():
+    if reports_df.empty or block not in reports_df["block"].unique():
         return {
             "block": block,
             "affected_total": 0,
@@ -455,6 +458,27 @@ def attribute_source(
         "disclaimer": CAUSATION_DISCLAIMER,
         "summary": "\n".join(summary_lines),
     }
+
+
+def attribute_source(
+    reports_csv: str,
+    block: str,
+    meals_csv: str | None = None,
+    population_scope: str = "campus",
+) -> dict:
+    """
+    Run source attribution for a single block, loading reports (and
+    optionally meals) from CSV files first. See attribute_source_from_df
+    for the underlying logic and full return-value docs.
+    """
+    reports_df = load_reports(reports_csv)
+    meals_df = load_meals(meals_csv) if meals_csv else None
+    return attribute_source_from_df(
+        reports_df=reports_df,
+        block=block,
+        meals_df=meals_df,
+        population_scope=population_scope,
+    )
 
 
 if __name__ == "__main__":

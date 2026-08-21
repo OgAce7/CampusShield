@@ -7,11 +7,11 @@ Implements:
 - POST /reports, GET /reports
 - POST /meals, GET /meals
 - GET /blocks
+- GET /dashboard/overview, /dashboard/blocks, /dashboard/alerts,
+  /dashboard/sources (outbreak detection + source attribution, wired to
+  live SQLite data via analysis_bridge.py - see dashboard.py)
 
 Intentionally NOT implemented (future work):
-- outbreak detection logic
-- ML / anomaly scoring
-- source attribution
 - notifications
 - authentication
 - real maps / GIS
@@ -23,6 +23,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import database
+from dashboard import router as dashboard_router
 from models import ReportCreate, ReportOut, MealCreate, MealOut, BlockOut
 
 app = FastAPI(
@@ -39,6 +40,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(dashboard_router)
 
 
 @app.on_event("startup")

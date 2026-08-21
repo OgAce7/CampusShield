@@ -443,6 +443,7 @@ def score_block(
         "current_cases": current,
         "baseline_cases": round(baseline, 1),
         "growth_factor": round(growth_factor, 2),
+        "growth_trend": growth_desc,
         "risk_score": risk_score,
         "severity": severity,
         "dominant_symptoms": dominant_symptoms,
@@ -515,12 +516,51 @@ def _pretty_exposure(exposure: str) -> str:
 # Engine entry point
 # ---------------------------------------------------------------------------
 
-def run_engine(csv_path: str) -> list[dict]:
+def empty_block_result(block: str) -> dict:
     """
-    Run the full detection engine on a symptom_reports.csv file.
-    Returns a list of per-block result dicts, sorted by risk_score descending.
+    Result for a block (or a whole dataset) with no reports at all. Kept as
+    a named helper so callers with zero data (e.g. a freshly-seeded DB) get
+    the exact same schema as a normally-scored block, just all-NORMAL.
     """
-    df = load_reports(csv_path)
+    return {
+        "block": block,
+        "current_cases": 0,
+        "baseline_cases": 0.0,
+        "growth_factor": 1.0,
+        "growth_trend": "no recent cases",
+        "risk_score": 0,
+        "severity": "NORMAL",
+        "dominant_symptoms": [],
+        "symptom_similarity": 0.0,
+        "common_exposure": "NONE",
+        "exposure_overlap": 0.0,
+        "onset_window": "insufficient data",
+        "reasons": ["no reports on file for this block"],
+        "_signal_breakdown": {k: 0.0 for k in WEIGHTS},
+    }
+
+
+def run_engine_from_df(df: pd.DataFrame) -> list[dict]:
+    """
+    Run the full detection engine on an already-loaded reports DataFrame
+    (must already have onset_time as datetime and a symptom_list column -
+    see load_reports for the exact prep). This is the entry point used by
+    callers that source reports from something other than a CSV (e.g. the
+    backend's SQLite database) - run_engine() below is a thin CSV-loading
+    wrapper around this.
+
+    Returns a list of per-block result dicts, sorted by risk_score
+    descending. If the DataFrame has no rows at all, returns a NORMAL
+    result for every block rather than erroring (there is no "latest
+    onset_time" to anchor windows to when there is no data yet).
+    """
+    if df.empty:
+        return sorted(
+            [empty_block_result(b) for b in ALL_BLOCKS],
+            key=lambda r: r["risk_score"],
+            reverse=True,
+        )
+
     windows = get_time_windows(df)
 
     case_counts, recent_df, baseline_df = compute_case_counts(df, windows)
@@ -544,6 +584,15 @@ def run_engine(csv_path: str) -> list[dict]:
 
     results.sort(key=lambda r: r["risk_score"], reverse=True)
     return results
+
+
+def run_engine(csv_path: str) -> list[dict]:
+    """
+    Run the full detection engine on a symptom_reports.csv file.
+    Returns a list of per-block result dicts, sorted by risk_score descending.
+    """
+    df = load_reports(csv_path)
+    return run_engine_from_df(df)
 
 
 if __name__ == "__main__":
