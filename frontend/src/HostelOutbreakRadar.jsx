@@ -77,6 +77,63 @@ const COLORS = {
   red: { fill: "#301213", border: "#b23b3f", text: "#f2606a", glow: "rgba(242,96,106,0.25)" },
 };
 
+// --- simulated advisory system -------------------------------------------
+// Template-based only (no generative model). Fires when a block's risk score
+// crosses the PROBABLE threshold (>=80). Two outputs:
+//   1. a resident-facing advisory notice (no individual identities, no diagnosis)
+//   2. a health-center alert with the supporting evidence a nurse/warden would want
+// Everything here is clearly labeled SIMULATED and produces no real notification.
+
+const ADVISORY_THRESHOLD = 80;
+const BLOCK_POPULATION = 64; // assumed residents per block, for demo targeting counts only
+
+const ADVISORY_MESSAGE =
+  "An unusual increase in gastrointestinal symptoms has been detected in your block. " +
+  "Please follow standard hygiene precautions and report symptoms to the campus health " +
+  "center if they develop.";
+
+function buildAdvisories(blocks) {
+  return blocks
+    .filter((b) => b.risk >= ADVISORY_THRESHOLD)
+    .map((b) => {
+      const unaffected = Math.max(BLOCK_POPULATION - b.cases, 0);
+      return {
+        id: `adv_${b.id}`,
+        block: b.id,
+        timestamp: new Date().toISOString(),
+        severity: riskState(b.risk).label,
+        message: ADVISORY_MESSAGE,
+        targeted: unaffected,
+        status: "SIMULATED",
+      };
+    });
+}
+
+function buildHealthCenterAlerts(blocks) {
+  return blocks
+    .filter((b) => b.risk >= ADVISORY_THRESHOLD)
+    .map((b) => ({
+      id: `hc_${b.id}`,
+      block: b.id,
+      timestamp: new Date().toISOString(),
+      caseCount: b.cases,
+      riskScore: b.risk,
+      suspectedExposure: b.foodExposure,
+      evidence: [
+        `Cases running ${Math.max(1, Math.round(b.cases / Math.max(b.baseline, 1)))}x above the ${b.baseline}-case rolling baseline`,
+        `${b.exposureOverlap}% of reporters in ${b.id} share exposure to ${b.foodExposure}`,
+        `Symptom profile clustered around ${b.dominantSymptoms.join(", ")}`,
+        `Onset times fall within a narrow window: ${b.onsetWindow}`,
+      ],
+      status: "SIMULATED",
+    }));
+}
+
+function formatTimestamp(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 function explainRisk(block) {
   if (!block) return "";
   const st = riskState(block.risk);
@@ -463,6 +520,74 @@ function ReportForm({ apiBase, onBack }) {
   );
 }
 
+function AdvisoryPanel({ advisories }) {
+  return (
+    <section className="panel advisory-panel">
+      <div className="panel-head">
+        <h2>Simulated resident advisories</h2>
+        <span className="sim-badge">SIMULATED \u2014 no real notification sent</span>
+      </div>
+      {advisories.length === 0 ? (
+        <div className="empty-state">No block has crossed the PROBABLE threshold (risk \u2265 {ADVISORY_THRESHOLD}). No advisories generated.</div>
+      ) : (
+        <ul className="advisory-list">
+          {advisories.map((a) => (
+            <li key={a.id} className="advisory-item">
+              <div className="advisory-item-head">
+                <span className="advisory-block">{a.block}</span>
+                <span className="advisory-severity" style={{ color: COLORS.red.text }}>{a.severity}</span>
+                <span className="advisory-time">{formatTimestamp(a.timestamp)}</span>
+              </div>
+              <p className="advisory-message">{a.message}</p>
+              <div className="advisory-meta">
+                <span>{a.targeted} unaffected students targeted</span>
+                <span className="advisory-status">{a.status}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function HealthCenterPanel({ alerts }) {
+  return (
+    <section className="panel healthcenter-panel">
+      <div className="panel-head">
+        <h2>Simulated health-center alert</h2>
+        <span className="sim-badge">SIMULATED</span>
+      </div>
+      {alerts.length === 0 ? (
+        <div className="empty-state">No active health-center alerts.</div>
+      ) : (
+        <ul className="hc-list">
+          {alerts.map((a) => (
+            <li key={a.id} className="hc-item">
+              <div className="hc-item-head">
+                <span className="hc-block">{a.block}</span>
+                <span className="hc-time">{formatTimestamp(a.timestamp)}</span>
+              </div>
+              <div className="hc-grid">
+                <div><span>Case count</span><strong>{a.caseCount}</strong></div>
+                <div><span>Risk score</span><strong>{a.riskScore}</strong></div>
+                <div><span>Suspected exposure</span><strong>{a.suspectedExposure}</strong></div>
+              </div>
+              <div className="hc-evidence">
+                <span className="hc-evidence-label">Supporting evidence</span>
+                <ul>
+                  {a.evidence.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              </div>
+              <div className="hc-foot">This is a statistical signal, not a diagnosis. Individual identities are not included.</div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 const ALERTS = [
   { time: "Day 10, 19:40", text: "B05\u2013B08 risk crossed 80 (PROBABLE) \u2014 MESS_A dinner exposure overlap 91%", level: "red" },
   { time: "Day 10, 14:10", text: "B07 risk crossed 60 (SUSPECTED) \u2014 symptom cluster forming around vomiting/diarrhea", level: "orange" },
@@ -519,6 +644,9 @@ export default function App() {
   }, []);
 
   const handleSelect = useCallback((id) => setSelectedId(id), []);
+
+  const advisories = useMemo(() => buildAdvisories(blocks), [blocks]);
+  const healthCenterAlerts = useMemo(() => buildHealthCenterAlerts(blocks), [blocks]);
 
   if (view === "landing") {
     return <Landing onPickStudent={() => setView("report")} onPickStaff={() => setView("login")} />;
@@ -667,8 +795,11 @@ export default function App() {
                 </div>
               </li>
             ))}
-          </ul>
         </section>
+
+        <AdvisoryPanel advisories={advisories} />
+        <HealthCenterPanel alerts={healthCenterAlerts} />
+
       </main>
 
       <style>{`
@@ -788,6 +919,7 @@ export default function App() {
 
         .trend-panel { grid-column: 1 / 2; }
         .sparkline { width: 100%; height: auto; }
+        .advisory-panel, .healthcenter-panel { grid-column: 1 / -1; }
 
         .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
         .timeline-item { display: flex; gap: 10px; align-items: flex-start; }
@@ -887,6 +1019,38 @@ export default function App() {
           font-size: 12px; margin-top: 12px; cursor: pointer; font-family: inherit; text-align: center;
         }
         .report-link:hover { color: #cdd3e0; }
+
+        .sim-badge {
+          font-size: 9.5px; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 999px;
+          background: rgba(240,149,74,0.12); color: #f0954a; border: 1px solid rgba(240,149,74,0.3);
+          text-transform: uppercase; white-space: nowrap;
+        }
+
+        .advisory-list, .hc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+        .advisory-item {
+          background: rgba(242,96,106,0.05); border: 1px solid rgba(242,96,106,0.2);
+          border-radius: 12px; padding: 14px 16px;
+        }
+        .advisory-item-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .advisory-block { font-size: 13px; font-weight: 700; color: #eef0f5; }
+        .advisory-severity { font-size: 10.5px; letter-spacing: 0.05em; font-weight: 600; }
+        .advisory-time { font-size: 11px; color: #6b7280; margin-left: auto; }
+        .advisory-message { font-size: 12.5px; color: #c3c8d4; line-height: 1.55; margin: 0 0 10px; }
+        .advisory-meta { display: flex; justify-content: space-between; font-size: 11px; color: #8b93a5; }
+        .advisory-status { color: #f0954a; font-weight: 600; letter-spacing: 0.04em; }
+
+        .hc-item { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 14px 16px; }
+        .hc-item-head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .hc-block { font-size: 13px; font-weight: 700; color: #eef0f5; }
+        .hc-time { font-size: 11px; color: #6b7280; }
+        .hc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+        .hc-grid div { display: flex; flex-direction: column; gap: 3px; }
+        .hc-grid span { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; color: #8b93a5; }
+        .hc-grid strong { font-size: 13px; color: #eef0f5; }
+        .hc-evidence-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #8b93a5; }
+        .hc-evidence ul { margin: 6px 0 0; padding-left: 16px; }
+        .hc-evidence li { font-size: 12px; color: #c3c8d4; line-height: 1.6; }
+        .hc-foot { font-size: 10.5px; color: #5a6070; font-style: italic; margin-top: 10px; }
       `}</style>
     </div>
   );
