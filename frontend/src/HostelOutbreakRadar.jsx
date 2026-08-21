@@ -1,10 +1,15 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 
 const BOYS = ["B01","B02","B03","B04","B05","B06","B07","B08","B09","B10","B11","B12"];
 const GIRLS = ["G01","G02","G03","G04","G05","G06","G07","G08"];
 
 const SYMPTOM_POOL = ["Nausea","Vomiting","Diarrhea","Fever","Cramps","Fatigue"];
-const FOOD_POOL = ["MESS_A dinner","MESS_A lunch","MESS_B dinner","MESS_B lunch","OUTSIDE_FOOD"];
+
+// --- deterministic demo data --------------------------------------------
+// No randomness in the demo path: baseline values are fixed per block so the
+// presentation is byte-for-byte repeatable across runs. A small seeded PRNG
+// is used only to vary cosmetic baseline symptom pairs — never case counts
+// or risk scores, which are the numbers a judge will actually watch.
 
 function seededRandom(seed) {
   let s = seed % 2147483647;
@@ -15,50 +20,96 @@ function seededRandom(seed) {
   };
 }
 
-function generateMockBlocks() {
-  const rand = seededRandom(42);
-  const outbreakBlocks = new Set(["B05", "B06", "B07", "B08"]);
+// A couple of blocks run slightly hot from ordinary background illness —
+// this is the "normal noise" the system needs to tell an outbreak apart from.
+const BACKGROUND_NOISE_BLOCKS = { G02: 34, B09: 31 };
+
+const BASELINE_FOOD_CYCLE = ["MESS_A lunch", "MESS_B lunch", "MESS_A dinner", "MESS_B dinner", "OUTSIDE_FOOD"];
+
+function buildBaselineBlocks() {
+  const rand = seededRandom(1337);
   const all = [...BOYS.map((id) => ({ id, wing: "Boys" })), ...GIRLS.map((id) => ({ id, wing: "Girls" }))];
 
-  return all.map(({ id, wing }) => {
-    const isOutbreak = outbreakBlocks.has(id);
-    const baseline = Math.round(8 + rand() * 6);
-    let cases, casesToday, risk;
-
-    if (isOutbreak) {
-      cases = Math.round(28 + rand() * 22);
-      casesToday = Math.round(9 + rand() * 8);
-      risk = Math.round(66 + rand() * 32);
-    } else {
-      const noisy = rand() < 0.15;
-      cases = Math.round(baseline * (noisy ? 1.8 : 1) + rand() * 4);
-      casesToday = Math.round(1 + rand() * (noisy ? 6 : 3));
-      risk = Math.round((cases / (baseline * 2.2)) * 55 + rand() * 12);
-      risk = Math.min(risk, noisy ? 58 : 45);
-    }
-    risk = Math.max(3, Math.min(100, risk));
-
-    const dominantSymptoms = isOutbreak
-      ? ["Vomiting", "Diarrhea", "Cramps"]
-      : [SYMPTOM_POOL[Math.floor(rand() * SYMPTOM_POOL.length)], SYMPTOM_POOL[Math.floor(rand() * SYMPTOM_POOL.length)]];
-
-    const foodExposure = isOutbreak ? "MESS_A dinner" : FOOD_POOL[Math.floor(rand() * FOOD_POOL.length)];
-    const exposureOverlap = isOutbreak ? Math.round(78 + rand() * 18) : Math.round(15 + rand() * 35);
-    const onsetStart = isOutbreak ? 6 : Math.round(2 + rand() * 10);
-    const onsetSpread = isOutbreak ? 4 : Math.round(6 + rand() * 10);
+  return all.map(({ id, wing }, i) => {
+    const noiseRisk = BACKGROUND_NOISE_BLOCKS[id];
+    const baseline = 8 + (i % 5); // fixed spread, not random
+    const cases = noiseRisk ? baseline + 3 : Math.min(baseline, (i % 3) + 1);
+    const risk = noiseRisk || 6 + (i % 4) * 3;
+    const s1 = SYMPTOM_POOL[i % SYMPTOM_POOL.length];
+    const s2 = SYMPTOM_POOL[(i + 2) % SYMPTOM_POOL.length];
 
     return {
       id,
       wing,
       cases,
-      casesToday,
+      casesToday: noiseRisk ? 2 : (i % 3),
       baseline,
       risk,
-      dominantSymptoms: [...new Set(dominantSymptoms)],
-      foodExposure,
-      exposureOverlap,
-      onsetWindow: `${onsetStart}h \u2013 ${onsetStart + onsetSpread}h post-meal`,
-      isOutbreak,
+      dominantSymptoms: [...new Set([s1, s2])],
+      foodExposure: BASELINE_FOOD_CYCLE[i % BASELINE_FOOD_CYCLE.length],
+      exposureOverlap: noiseRisk ? 22 : 12 + (i % 4) * 3,
+      onsetWindow: `${2 + (i % 6)}h \u2013 ${8 + (i % 6)}h post-meal`,
+      isOutbreak: false,
+    };
+  });
+}
+
+// Fixed end-state for the "SIMULATE OUTBREAK" scenario — matches the
+// hackathon walkthrough numbers exactly. All synthetic demonstration data.
+const OUTBREAK_TARGETS = {
+  B03: {
+    cases: 12, risk: 89,
+    dominantSymptoms: ["Vomiting", "Diarrhea", "Cramps"],
+    foodExposure: "MESS_A lunch",
+    exposureOverlap: 92,
+    onsetWindow: "5h \u2013 9h post-meal",
+  },
+  B04: {
+    cases: 7, risk: 72,
+    dominantSymptoms: ["Vomiting", "Diarrhea"],
+    foodExposure: "MESS_A lunch",
+    exposureOverlap: 81,
+    onsetWindow: "6h \u2013 10h post-meal",
+  },
+  B05: {
+    cases: 5, risk: 61,
+    dominantSymptoms: ["Nausea", "Diarrhea"],
+    foodExposure: "MESS_A lunch",
+    exposureOverlap: 68,
+    onsetWindow: "6h \u2013 11h post-meal",
+  },
+};
+
+const OUTBREAK_CLUSTER_BLOCK = "B03";
+const DEMO_STAGE_COUNT = 4; // 0 = baseline, 4 = final outbreak state
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+// Given the fixed baseline and the fixed target, compute the exact
+// intermediate state for a given stage (0..DEMO_STAGE_COUNT). Pure function
+// of (baselineBlock, stage) — same stage always produces the same output.
+function applyDemoStage(baselineBlocks, stage) {
+  const t = Math.min(stage, DEMO_STAGE_COUNT) / DEMO_STAGE_COUNT;
+  return baselineBlocks.map((b) => {
+    const target = OUTBREAK_TARGETS[b.id];
+    if (!target || stage === 0) return b;
+
+    // symptoms and food source converge discretely partway through, rather
+    // than blending, since real symptom clustering is a step change, not a gradient
+    const converged = t >= 0.5;
+
+    return {
+      ...b,
+      cases: Math.round(lerp(b.cases, target.cases, t)),
+      casesToday: Math.round(lerp(b.casesToday, Math.max(2, Math.round(target.cases * 0.4)), t)),
+      risk: Math.round(lerp(b.risk, target.risk, t)),
+      dominantSymptoms: converged ? target.dominantSymptoms : b.dominantSymptoms,
+      foodExposure: converged ? target.foodExposure : b.foodExposure,
+      exposureOverlap: Math.round(lerp(b.exposureOverlap, target.exposureOverlap, t)),
+      onsetWindow: converged ? target.onsetWindow : b.onsetWindow,
+      isOutbreak: t >= 1,
     };
   });
 }
@@ -310,7 +361,6 @@ function LoginGate({ onLogin }) {
   );
 }
 
-const ALL_BLOCKS = [...BOYS, ...GIRLS];
 const SYMPTOM_OPTIONS = ["Nausea", "Vomiting", "Diarrhea", "Abdominal pain", "Fever", "Headache"];
 const SEVERITY_OPTIONS = ["Mild", "Moderate", "Severe"];
 const FOOD_EXPOSURE_OPTIONS = ["Mess A", "Mess B", "Outside food"];
@@ -588,13 +638,35 @@ function HealthCenterPanel({ alerts }) {
   );
 }
 
-const ALERTS = [
-  { time: "Day 10, 19:40", text: "B05\u2013B08 risk crossed 80 (PROBABLE) \u2014 MESS_A dinner exposure overlap 91%", level: "red" },
-  { time: "Day 10, 14:10", text: "B07 risk crossed 60 (SUSPECTED) \u2014 symptom cluster forming around vomiting/diarrhea", level: "orange" },
-  { time: "Day 9, 21:05", text: "B06 flagged WATCH \u2014 cases 2.1x rolling baseline", level: "yellow" },
-  { time: "Day 9, 08:15", text: "B05 first cluster reports logged, onset window narrowing", level: "yellow" },
+// Historical entries predate the demo scenario and never change. Live entries
+// are derived from the current block state so the timeline always matches
+// whatever the SIMULATE OUTBREAK / RESET DEMO buttons have produced — no
+// hardcoded block names that could drift out of sync with the scenario data.
+const HISTORICAL_ALERTS = [
   { time: "Day 6, 12:00", text: "System baseline recalibrated across all 20 blocks", level: "green" },
+  { time: "Day 8, 09:20", text: "G02 flagged WATCH \u2014 mild seasonal uptick, resolved within 48h", level: "yellow" },
 ];
+
+function buildTimeline(blocks, demoStage) {
+  if (demoStage === 0) return HISTORICAL_ALERTS;
+  const live = [];
+  // ordered by cluster dominance so the lead block (highest risk) reads first
+  const clusterOrder = Object.keys(OUTBREAK_TARGETS).sort(
+    (a, b) => OUTBREAK_TARGETS[b].risk - OUTBREAK_TARGETS[a].risk
+  );
+  clusterOrder.forEach((id) => {
+    const b = blocks.find((x) => x.id === id);
+    if (!b) return;
+    const st = riskState(b.risk);
+    if (st.key === "green") return;
+    live.push({
+      time: `Live \u00B7 stage ${demoStage}/${DEMO_STAGE_COUNT}`,
+      text: `${id} risk reached ${b.risk} (${st.label}) \u2014 ${b.exposureOverlap}% exposure overlap on ${b.foodExposure}`,
+      level: st.key,
+    });
+  });
+  return [...live, ...HISTORICAL_ALERTS];
+}
 
 function Landing({ onPickStudent, onPickStaff }) {
   return (
@@ -615,11 +687,45 @@ function Landing({ onPickStudent, onPickStaff }) {
 export default function App() {
   const [view, setView] = useState("landing"); // landing | report | login | dashboard
   const [session, setSession] = useState(null);
-  const [blocks] = useState(generateMockBlocks);
-  const [selectedId, setSelectedId] = useState(() => {
-    const b = generateMockBlocks().find((b) => b.isOutbreak);
-    return b ? b.id : null;
-  });
+  const [baselineBlocks] = useState(buildBaselineBlocks);
+  const [demoStage, setDemoStage] = useState(0); // 0 = baseline, DEMO_STAGE_COUNT = full outbreak
+  const [demoRunning, setDemoRunning] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const intervalRef = useRef(null);
+
+  const blocks = useMemo(() => applyDemoStage(baselineBlocks, demoStage), [baselineBlocks, demoStage]);
+
+  useEffect(() => {
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, []);
+
+  const runSimulation = useCallback(() => {
+    if (demoRunning) return;
+    setDemoRunning(true);
+    setDemoStage(0);
+    setSelectedId(null);
+    let stage = 0;
+    intervalRef.current = setInterval(() => {
+      stage += 1;
+      setDemoStage(stage);
+      if (stage === 1) setSelectedId(OUTBREAK_CLUSTER_BLOCK);
+      if (stage >= DEMO_STAGE_COUNT) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+        setDemoRunning(false);
+      }
+    }, 900);
+  }, [demoRunning]);
+
+  const resetDemo = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    setDemoRunning(false);
+    setDemoStage(0);
+    setSelectedId(null);
+  }, []);
 
   const selected = useMemo(() => blocks.find((b) => b.id === selectedId) || null, [blocks, selectedId]);
 
@@ -637,16 +743,17 @@ export default function App() {
     const days = [];
     for (let i = 1; i <= 10; i++) {
       let value = Math.round(14 + rand() * 8);
-      if (i >= 8) value = Math.round(30 + (i - 7) * 14 + rand() * 6);
-      days.push({ label: `D${i}`, value, marker: i === 8 });
+      if (i >= 8 && demoStage > 0) value = Math.round(30 + (i - 7) * 14 * (demoStage / DEMO_STAGE_COUNT) + rand() * 6);
+      days.push({ label: `D${i}`, value, marker: i === 8 && demoStage > 0 });
     }
     return days;
-  }, []);
+  }, [demoStage]);
 
   const handleSelect = useCallback((id) => setSelectedId(id), []);
 
   const advisories = useMemo(() => buildAdvisories(blocks), [blocks]);
   const healthCenterAlerts = useMemo(() => buildHealthCenterAlerts(blocks), [blocks]);
+  const timeline = useMemo(() => buildTimeline(blocks, demoStage), [blocks, demoStage]);
 
   if (view === "landing") {
     return <Landing onPickStudent={() => setView("report")} onPickStaff={() => setView("login")} />;
@@ -670,10 +777,20 @@ export default function App() {
           <span className="topbar-pill">LIVE \u2014 MOCK DATA</span>
         </div>
         <div className="topbar-right">
+          <button className="demo-btn demo-btn--simulate" onClick={runSimulation} disabled={demoRunning}>
+            {demoRunning ? `Simulating\u2026 stage ${demoStage}/${DEMO_STAGE_COUNT}` : "Simulate outbreak"}
+          </button>
+          <button className="demo-btn demo-btn--reset" onClick={resetDemo}>Reset demo</button>
           <span className="session-info">{session.staffId} \u00B7 {session.role}</span>
           <button className="logout-btn" onClick={() => { setSession(null); setView("landing"); }}>Sign out</button>
         </div>
       </header>
+
+      {demoStage > 0 && (
+        <div className="demo-banner">
+          Demo simulation {demoRunning ? "running" : "complete"} \u2014 stage {demoStage}/{DEMO_STAGE_COUNT} \u2014 all figures are synthetic demonstration data.
+        </div>
+      )}
 
       <main className="grid">
         <section className="kpi-row">
@@ -785,16 +902,21 @@ export default function App() {
 
         <section className="panel timeline-panel">
           <div className="panel-head"><h2>Alert timeline</h2></div>
-          <ul className="timeline">
-            {ALERTS.map((a, i) => (
-              <li key={i} className="timeline-item">
-                <span className="timeline-dot" style={{ background: COLORS[a.level].text }} />
-                <div>
-                  <div className="timeline-text">{a.text}</div>
-                  <div className="timeline-time">{a.time}</div>
-                </div>
-              </li>
-            ))}
+          {timeline.length === 0 ? (
+            <div className="empty-state">No alerts yet.</div>
+          ) : (
+            <ul className="timeline">
+              {timeline.map((a, i) => (
+                <li key={i} className="timeline-item">
+                  <span className="timeline-dot" style={{ background: COLORS[a.level].text }} />
+                  <div>
+                    <div className="timeline-text">{a.text}</div>
+                    <div className="timeline-time">{a.time}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <AdvisoryPanel advisories={advisories} />
@@ -818,21 +940,38 @@ export default function App() {
           background: rgba(13,17,23,0.6);
           backdrop-filter: blur(12px);
           position: sticky; top: 0; z-index: 10;
+          flex-wrap: wrap;
+          gap: 10px;
         }
-        .topbar-left { display: flex; align-items: center; gap: 12px; }
+        .topbar-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
         .topbar-mark { color: #5b8cf0; font-size: 18px; }
         .topbar-title { font-size: 15px; font-weight: 600; letter-spacing: 0.12em; }
         .topbar-pill {
           font-size: 10px; letter-spacing: 0.08em; padding: 3px 9px; border-radius: 999px;
           background: rgba(95,214,148,0.12); color: #5fd694; border: 1px solid rgba(95,214,148,0.3);
         }
-        .topbar-right { display: flex; align-items: center; gap: 14px; }
+        .topbar-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
         .session-info { font-size: 12px; color: #8b93a5; }
         .logout-btn {
           background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
           color: #cdd3e0; font-size: 12px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
         }
         .logout-btn:hover { background: rgba(255,255,255,0.1); }
+
+        .demo-btn {
+          font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+          font-family: inherit; border: 1px solid transparent;
+        }
+        .demo-btn--simulate { background: #f0954a; color: #2e1c0f; }
+        .demo-btn--simulate:hover { background: #f5a866; }
+        .demo-btn--simulate:disabled { opacity: 0.7; cursor: not-allowed; }
+        .demo-btn--reset { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.12); color: #cdd3e0; }
+        .demo-btn--reset:hover { background: rgba(255,255,255,0.1); }
+
+        .demo-banner {
+          text-align: center; font-size: 11.5px; color: #f0954a; background: rgba(240,149,74,0.08);
+          border-bottom: 1px solid rgba(240,149,74,0.2); padding: 6px 12px; letter-spacing: 0.02em;
+        }
 
         .grid {
           max-width: 1400px; margin: 0 auto; padding: 24px 28px;
@@ -878,11 +1017,8 @@ export default function App() {
         .block-cases { font-size: 15px; font-weight: 700; color: #f1f3f8; }
         .block-state { font-size: 8px; letter-spacing: 0.05em; }
 
-        .mess-row { display: flex; gap: 10px; padding: 10px 0; border-top: 1px dashed rgba(255,255,255,0.1); border-bottom: 1px dashed rgba(255,255,255,0.1); }
-        .mess-node {
-          flex: 1; background: rgba(91,140,240,0.08); border: 1px solid rgba(91,140,240,0.25);
-          border-radius: 10px; padding: 10px; text-align: center;
-        }
+        .mess-row { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px 0; border-top: 1px dashed rgba(255,255,255,0.1); border-bottom: 1px dashed rgba(255,255,255,0.1); }
+        .mess-node { flex: 1 1 120px; background: rgba(91,140,240,0.08); border: 1px solid rgba(91,140,240,0.25); border-radius: 10px; padding: 10px; text-align: center; }
         .mess-icon { font-size: 16px; color: #5b8cf0; }
         .mess-label { font-size: 12px; font-weight: 600; color: #cdd3e0; margin-top: 2px; }
         .mess-sub { font-size: 10px; color: #6b7280; margin-top: 1px; }
@@ -931,6 +1067,14 @@ export default function App() {
           .grid { grid-template-columns: 1fr; }
           .kpi-row { grid-template-columns: repeat(2, 1fr); }
           .block-grid--boys, .block-grid--girls { grid-template-columns: repeat(4, 1fr); }
+        }
+        @media (max-width: 640px) {
+          .topbar { padding: 14px 16px; }
+          .topbar-title { font-size: 13px; }
+          .kpi-row { grid-template-columns: 1fr 1fr; }
+          .grid { padding: 16px; }
+          .block-grid--boys, .block-grid--girls { grid-template-columns: repeat(3, 1fr); }
+          .hc-grid { grid-template-columns: 1fr 1fr; }
         }
 
         .login-wrap {
