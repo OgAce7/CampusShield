@@ -1,7 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react";
-
-const BOYS = ["B01","B02","B03","B04","B05","B06","B07","B08","B09","B10","B11","B12"];
-const GIRLS = ["G01","G02","G03","G04","G05","G06","G07","G08"];
+import { BOYS_HOSTELS as BOYS, GIRLS_HOSTELS as GIRLS } from "./campusData";
 
 // Point this at wherever the FastAPI backend is running.
 // (Leave empty string to hit same-origin, e.g. when the frontend is
@@ -612,9 +610,9 @@ export default function App() {
             </div>
 
             <div className="mess-row">
-              <MessNode label="Mess A" sub="B01\u2013B08 primary" />
-              <MessNode label="Mess B" sub="B09\u2013G08 primary" />
-              <MessNode label="Outside food" sub="unaffiliated" />
+              <MessNode label="Mess A" sub="campus dining hall" />
+              <MessNode label="Mess B" sub="campus dining hall" />
+              <MessNode label="Outside food" sub="off-campus / unaffiliated" />
             </div>
 
             <div className="wing">
