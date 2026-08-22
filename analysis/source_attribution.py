@@ -444,7 +444,7 @@ def attribute_source_from_df(
             "exposures": [],
             "top_suspected_exposure": None,
             "disclaimer": CAUSATION_DISCLAIMER,
-            "summary": f"Block {block}: no reports found.",
+            "summary": f"Block {block}: no reports found.\n  {CAUSATION_DISCLAIMER}",
         }
 
     stats_list = [

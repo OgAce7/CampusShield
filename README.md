@@ -173,6 +173,7 @@ runnable against the demo CSVs:
 cd analysis
 python3 report.py          # human-readable per-block risk report (CSV-based)
 python3 test_engine.py     # sanity checks for outbreak_engine.py
+python3 test_source_attribution.py   # sanity checks for source_attribution.py
 python3 source_attribution.py B05   # attribution report for a single block (CSV-based)
 ```
 
@@ -180,7 +181,5 @@ See `/analysis/README.md` for the full signal breakdown.
 
 ## Next Steps (future work)
 
-- Add automated tests for `source_attribution.py` (currently only `outbreak_engine.py` is covered)
-- Wire up a real chart library (Recharts is installed but unused; all current charts are hand-rolled CSS)
 - Add an ingestion path so `/data`'s generated CSVs can seed the live SQLite DB directly, for demo purposes
 - Persist sessions past a server restart, if a longer-running deployment is ever needed
