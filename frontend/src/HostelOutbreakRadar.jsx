@@ -18,11 +18,20 @@ async function apiFetch(path, { token, method = "GET", body } = {}) {
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (token) headers["X-Session-Token"] = token;
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // fetch() throws (rather than resolving with a non-ok response) when it
+    // can't reach the server at all - wrong port, backend not running, CORS
+    // block, etc. The native error message here is just "Failed to fetch",
+    // which isn't useful on its own, so replace it with something actionable.
+    throw new Error(`Can't reach the backend at ${API_BASE}. Is it running?`);
+  }
 
   if (!res.ok) {
     let detail = `Request failed (${res.status})`;
@@ -158,16 +167,13 @@ function LoginGate({ onLogin }) {
       <div className="login-card">
         <div className="login-mark">◉</div>
         <h1 className="login-title">Hostel Outbreak Radar</h1>
-        <p className="login-sub">Campus health staff sign-in. No password — this is a hackathon-simple session, see backend/auth.py.</p>
+        <p className="login-sub">Campus health staff sign-in.</p>
         <form onSubmit={submit}>
           <label className="login-label" htmlFor="staffName">Name</label>
-          <input id="staffName" className="login-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Health Desk Staff" autoComplete="name" />
+          <input id="staffName" className="login-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter your name" autoComplete="name" />
           {error && <div className="login-error">{error}</div>}
           <button className="login-btn" type="submit" disabled={loading}>{loading ? "Signing in…" : "Sign in"}</button>
         </form>
-        <div className="login-foot">
-          Authenticates against POST /login and stores the returned session token (sent back as X-Session-Token).
-        </div>
       </div>
     </div>
   );
@@ -959,6 +965,16 @@ function GlobalStyles() {
           appearance: none;
         }
         .field-input:focus { outline: none; border-color: #5b8cf0; }
+        /* Native <select> dropdown popups (especially on mobile) often ignore
+           the page's dark background and render on a plain white system
+           background, regardless of the <select>'s own styling above. Give
+           <option>/<optgroup> an explicit dark color so they stay legible
+           against that white popup instead of inheriting the near-white
+           text color meant for the dark closed box. */
+        .field-input option, .field-input optgroup {
+          color: #111827;
+          background: #ffffff;
+        }
         .field-error { color: #f2606a; font-size: 11.5px; margin-top: 6px; }
 
         .chip-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
