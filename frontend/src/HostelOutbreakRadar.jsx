@@ -4,7 +4,7 @@ import { BOYS_HOSTELS as BOYS, GIRLS_HOSTELS as GIRLS } from "./campusData";
 // Point this at wherever the FastAPI backend is running.
 // (Leave empty string to hit same-origin, e.g. when the frontend is
 // reverse-proxied behind the API in production.)
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL;
 
 // ---------------------------------------------------------------------------
 // API helper
