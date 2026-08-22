@@ -1,128 +1,88 @@
 """
 Auth module for Hostel Outbreak Radar backend.
 
-Drop this into /backend as auth.py, then in main.py:
+Hackathon-simple by design (see main.py's module docstring): no passwords,
+no JWT, no DB-backed sessions. A caller "logs in" with just a display name
+and a role, and gets back an opaque session token to send back on later
+requests as the X-Session-Token header. Sessions live in memory and are
+lost on server restart - that's intentional for this skeleton phase.
 
-    from auth import router as auth_router, get_current_staff
-    app.include_router(auth_router)
+Usage (already wired up in main.py):
 
-Protect any endpoint with:
+    import auth
 
-    @app.get("/reports")
-    def list_reports(staff = Depends(get_current_staff)):
+    @app.post("/login")
+    def login(credentials: LoginRequest):
+        token = auth.create_session(name=credentials.name, role=credentials.role)
         ...
 
-Install deps:
-    pip install "python-jose[cryptography]" "passlib[bcrypt]" python-multipart
+    @app.get("/reports", dependencies=[Depends(auth.require_role("clinic"))])
+    def list_reports():
+        ...
 
-This is a minimal reference implementation for a hackathon demo:
-- Staff accounts are hardcoded in STAFF_DB below (swap for a real table later).
-- JWT secret is read from an env var with a dev fallback — set OUTBREAK_RADAR_SECRET
-  in production.
-- Tokens expire after 8 hours (one shift).
+    @app.get("/meals", dependencies=[Depends(auth.get_current_session)])
+    def list_meals():
+        ...
 """
 
-import os
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+import secrets
+from typing import Dict
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
-from passlib.context import CryptContext
-from pydantic import BaseModel
+from fastapi import Depends, Header, HTTPException, status
 
-SECRET_KEY = os.environ.get("OUTBREAK_RADAR_SECRET", "dev-only-secret-change-me")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 8 * 60
+VALID_ROLES = ["student", "clinic"]
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
-
-router = APIRouter(prefix="/auth", tags=["auth"])
-
-VALID_ROLES = ["student", "health_staff"]
+# session_token -> {"name": str, "role": str}
+# In-memory only - fine at hackathon scale, resets on every server restart.
+_SESSIONS: Dict[str, dict] = {}
 
 
-# --- demo staff directory -----------------------------------------------
-# Replace with a real users table. Passwords below are bcrypt hashes of
-# "changeme123" — force a reset before using this beyond a hackathon demo.
-STAFF_DB = {
-    "HD-0231": {
-        "staff_id": "HD-0231",
-        "name": "Health Desk Staff",
-        "role": "health_staff",
-        "hashed_password": pwd_context.hash("changeme123"),
-    },
-}
+def create_session(name: str, role: str) -> str:
+    """Mint a new opaque session token for (name, role) and remember it."""
+    token = secrets.token_urlsafe(32)
+    _SESSIONS[token] = {"name": name, "role": role}
+    return token
 
 
-class Token(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    staff_id: str
-    role: str
-
-
-class StaffOut(BaseModel):
-    staff_id: str
-    name: str
-    role: str
-
-
-def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
-
-
-def authenticate_staff(staff_id: str, password: str):
-    staff = STAFF_DB.get(staff_id)
-    if not staff or not verify_password(password, staff["hashed_password"]):
-        return None
-    return staff
-
-
-def create_access_token(data: dict, expires_minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-
-@router.post("/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    staff = authenticate_staff(form_data.username, form_data.password)
-    if not staff:
+def get_current_session(
+    x_session_token: str = Header(..., alias="X-Session-Token"),
+) -> dict:
+    """
+    FastAPI dependency: resolves the X-Session-Token header to a session
+    dict ({"name": ..., "role": ...}), or 401s if it's missing/unknown.
+    Use this directly for endpoints that just require *any* logged-in
+    caller, regardless of role.
+    """
+    session = _SESSIONS.get(x_session_token)
+    if session is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect staff ID or password",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail="Invalid or missing session token",
         )
-    token = create_access_token({"sub": staff["staff_id"], "role": staff["role"]})
-    return Token(access_token=token, staff_id=staff["staff_id"], role=staff["role"])
+    return session
 
 
-def get_current_staff(token: str = Depends(oauth2_scheme)) -> StaffOut:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        staff_id: Optional[str] = payload.get("sub")
-        role: Optional[str] = payload.get("role")
-        if staff_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
+def require_role(role: str):
+    """
+    FastAPI dependency factory: like get_current_session, but additionally
+    403s if the caller's role doesn't match `role`.
 
-    staff = STAFF_DB.get(staff_id)
-    if staff is None:
-        raise credentials_exception
+        dependencies=[Depends(auth.require_role("student"))]
+    """
+    if role not in VALID_ROLES:
+        raise ValueError(f"require_role() called with unknown role '{role}', must be one of {VALID_ROLES}")
 
-    return StaffOut(staff_id=staff["staff_id"], name=staff["name"], role=role or staff["role"])
+    def _dependency(session: dict = Depends(get_current_session)) -> dict:
+        if session["role"] != role:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"This endpoint requires the '{role}' role",
+            )
+        return session
+
+    return _dependency
 
 
-@router.get("/me", response_model=StaffOut)
-def read_current_staff(current=Depends(get_current_staff)):
-    return current
+def clear_sessions() -> None:
+    """Exposed mainly for tests - drops every active session."""
+    _SESSIONS.clear()

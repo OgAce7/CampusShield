@@ -67,14 +67,18 @@ def reports_df_from_db() -> pd.DataFrame:
 def meals_df_from_db() -> pd.DataFrame:
     """
     Build the DataFrame source_attribution expects (a `datetime` column
-    derived from `date`) directly from the meals table.
+    derived from `date` + `meal_type`) directly from the meals table.
+    Delegates the actual date+meal_type -> datetime logic to
+    source_attribution._meal_datetime so there is exactly one definition of
+    "what time does breakfast/lunch/snacks/dinner mean", rather than two
+    copies that can drift out of sync.
     """
     records = database.get_all_meals()
     if not records:
         return pd.DataFrame(columns=["meal_id", "mess", "date", "meal_type", "food_items", "datetime"])
 
     df = pd.DataFrame(records)
-    df["datetime"] = pd.to_datetime(df["date"])
+    df["datetime"] = source_attribution._meal_datetime(df)
     return df
 
 

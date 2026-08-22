@@ -1,117 +1,49 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 
 const BOYS = ["B01","B02","B03","B04","B05","B06","B07","B08","B09","B10","B11","B12"];
 const GIRLS = ["G01","G02","G03","G04","G05","G06","G07","G08"];
 
-const SYMPTOM_POOL = ["Nausea","Vomiting","Diarrhea","Fever","Cramps","Fatigue"];
+// Point this at wherever the FastAPI backend is running.
+// (Leave empty string to hit same-origin, e.g. when the frontend is
+// reverse-proxied behind the API in production.)
+const API_BASE = "http://localhost:8000";
 
-// --- deterministic demo data --------------------------------------------
-// No randomness in the demo path: baseline values are fixed per block so the
-// presentation is byte-for-byte repeatable across runs. A small seeded PRNG
-// is used only to vary cosmetic baseline symptom pairs — never case counts
-// or risk scores, which are the numbers a judge will actually watch.
+// ---------------------------------------------------------------------------
+// API helper
+// ---------------------------------------------------------------------------
+// Every authenticated backend endpoint reads the caller's session from the
+// X-Session-Token header (see backend/auth.py: get_current_session /
+// require_role) - there is no bearer/JWT scheme, matching main.py exactly.
 
-function seededRandom(seed) {
-  let s = seed % 2147483647;
-  if (s <= 0) s += 2147483646;
-  return function () {
-    s = (s * 16807) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
-}
+async function apiFetch(path, { token, method = "GET", body } = {}) {
+  const headers = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (token) headers["X-Session-Token"] = token;
 
-// A couple of blocks run slightly hot from ordinary background illness —
-// this is the "normal noise" the system needs to tell an outbreak apart from.
-const BACKGROUND_NOISE_BLOCKS = { G02: 34, B09: 31 };
-
-const BASELINE_FOOD_CYCLE = ["MESS_A lunch", "MESS_B lunch", "MESS_A dinner", "MESS_B dinner", "OUTSIDE_FOOD"];
-
-function buildBaselineBlocks() {
-  const rand = seededRandom(1337);
-  const all = [...BOYS.map((id) => ({ id, wing: "Boys" })), ...GIRLS.map((id) => ({ id, wing: "Girls" }))];
-
-  return all.map(({ id, wing }, i) => {
-    const noiseRisk = BACKGROUND_NOISE_BLOCKS[id];
-    const baseline = 8 + (i % 5); // fixed spread, not random
-    const cases = noiseRisk ? baseline + 3 : Math.min(baseline, (i % 3) + 1);
-    const risk = noiseRisk || 6 + (i % 4) * 3;
-    const s1 = SYMPTOM_POOL[i % SYMPTOM_POOL.length];
-    const s2 = SYMPTOM_POOL[(i + 2) % SYMPTOM_POOL.length];
-
-    return {
-      id,
-      wing,
-      cases,
-      casesToday: noiseRisk ? 2 : (i % 3),
-      baseline,
-      risk,
-      dominantSymptoms: [...new Set([s1, s2])],
-      foodExposure: BASELINE_FOOD_CYCLE[i % BASELINE_FOOD_CYCLE.length],
-      exposureOverlap: noiseRisk ? 22 : 12 + (i % 4) * 3,
-      onsetWindow: `${2 + (i % 6)}h \u2013 ${8 + (i % 6)}h post-meal`,
-      isOutbreak: false,
-    };
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (data?.detail) detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+    } catch {
+      /* ignore - not JSON */
+    }
+    throw new Error(detail);
+  }
+
+  if (res.status === 204) return null;
+  return res.json();
 }
 
-// Fixed end-state for the "SIMULATE OUTBREAK" scenario — matches the
-// hackathon walkthrough numbers exactly. All synthetic demonstration data.
-const OUTBREAK_TARGETS = {
-  B03: {
-    cases: 12, risk: 89,
-    dominantSymptoms: ["Vomiting", "Diarrhea", "Cramps"],
-    foodExposure: "MESS_A lunch",
-    exposureOverlap: 92,
-    onsetWindow: "5h \u2013 9h post-meal",
-  },
-  B04: {
-    cases: 7, risk: 72,
-    dominantSymptoms: ["Vomiting", "Diarrhea"],
-    foodExposure: "MESS_A lunch",
-    exposureOverlap: 81,
-    onsetWindow: "6h \u2013 10h post-meal",
-  },
-  B05: {
-    cases: 5, risk: 61,
-    dominantSymptoms: ["Nausea", "Diarrhea"],
-    foodExposure: "MESS_A lunch",
-    exposureOverlap: 68,
-    onsetWindow: "6h \u2013 11h post-meal",
-  },
-};
-
-const OUTBREAK_CLUSTER_BLOCK = "B03";
-const DEMO_STAGE_COUNT = 4; // 0 = baseline, 4 = final outbreak state
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-// Given the fixed baseline and the fixed target, compute the exact
-// intermediate state for a given stage (0..DEMO_STAGE_COUNT). Pure function
-// of (baselineBlock, stage) — same stage always produces the same output.
-function applyDemoStage(baselineBlocks, stage) {
-  const t = Math.min(stage, DEMO_STAGE_COUNT) / DEMO_STAGE_COUNT;
-  return baselineBlocks.map((b) => {
-    const target = OUTBREAK_TARGETS[b.id];
-    if (!target || stage === 0) return b;
-
-    // symptoms and food source converge discretely partway through, rather
-    // than blending, since real symptom clustering is a step change, not a gradient
-    const converged = t >= 0.5;
-
-    return {
-      ...b,
-      cases: Math.round(lerp(b.cases, target.cases, t)),
-      casesToday: Math.round(lerp(b.casesToday, Math.max(2, Math.round(target.cases * 0.4)), t)),
-      risk: Math.round(lerp(b.risk, target.risk, t)),
-      dominantSymptoms: converged ? target.dominantSymptoms : b.dominantSymptoms,
-      foodExposure: converged ? target.foodExposure : b.foodExposure,
-      exposureOverlap: Math.round(lerp(b.exposureOverlap, target.exposureOverlap, t)),
-      onsetWindow: converged ? target.onsetWindow : b.onsetWindow,
-      isOutbreak: t >= 1,
-    };
-  });
+function login(name, role) {
+  // Matches main.py: POST /login { name, role } -> { session_token, name, role }
+  return apiFetch("/login", { method: "POST", body: { name, role } });
 }
 
 function riskState(score) {
@@ -128,54 +60,23 @@ const COLORS = {
   red: { fill: "#301213", border: "#b23b3f", text: "#f2606a", glow: "rgba(242,96,106,0.25)" },
 };
 
-// --- simulated advisory system -------------------------------------------
-// Template-based only (no generative model). Fires when a block's risk score
-// crosses the PROBABLE threshold (>=80). Two outputs:
-//   1. a resident-facing advisory notice (no individual identities, no diagnosis)
-//   2. a health-center alert with the supporting evidence a nurse/warden would want
-// Everything here is clearly labeled SIMULATED and produces no real notification.
-
-const ADVISORY_THRESHOLD = 80;
-const BLOCK_POPULATION = 64; // assumed residents per block, for demo targeting counts only
-
 const ADVISORY_MESSAGE =
   "An unusual increase in gastrointestinal symptoms has been detected in your block. " +
   "Please follow standard hygiene precautions and report symptoms to the campus health " +
   "center if they develop.";
 
-function buildAdvisories(blocks) {
-  return blocks
-    .filter((b) => b.risk >= ADVISORY_THRESHOLD)
-    .map((b) => {
-      const unaffected = Math.max(BLOCK_POPULATION - b.cases, 0);
-      return {
-        id: `adv_${b.id}`,
-        block: b.id,
-        timestamp: new Date().toISOString(),
-        severity: riskState(b.risk).label,
-        message: ADVISORY_MESSAGE,
-        targeted: unaffected,
-        status: "SIMULATED",
-      };
-    });
-}
-
-function buildHealthCenterAlerts(blocks) {
-  return blocks
-    .filter((b) => b.risk >= ADVISORY_THRESHOLD)
-    .map((b) => ({
-      id: `hc_${b.id}`,
-      block: b.id,
-      timestamp: new Date().toISOString(),
-      caseCount: b.cases,
-      riskScore: b.risk,
-      suspectedExposure: b.foodExposure,
-      evidence: [
-        `Cases running ${Math.max(1, Math.round(b.cases / Math.max(b.baseline, 1)))}x above the ${b.baseline}-case rolling baseline`,
-        `${b.exposureOverlap}% of reporters in ${b.id} share exposure to ${b.foodExposure}`,
-        `Symptom profile clustered around ${b.dominantSymptoms.join(", ")}`,
-        `Onset times fall within a narrow window: ${b.onsetWindow}`,
-      ],
+// Advisories/health-center panels stay clearly labeled SIMULATED (the
+// backend has no notification system - see README "Not Yet Implemented").
+// They're now built from the real /dashboard/alerts data instead of
+// fabricated block state, so the severities and evidence shown are real.
+function buildAdvisories(alerts) {
+  return alerts
+    .filter((a) => a.severity === "PROBABLE")
+    .map((a) => ({
+      id: `adv_${a.block_id}`,
+      block: a.block_id,
+      severity: a.severity,
+      message: ADVISORY_MESSAGE,
       status: "SIMULATED",
     }));
 }
@@ -183,21 +84,6 @@ function buildHealthCenterAlerts(blocks) {
 function formatTimestamp(iso) {
   const d = new Date(iso);
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function explainRisk(block) {
-  if (!block) return "";
-  const st = riskState(block.risk);
-  if (block.risk < 30) {
-    return `${block.id} is within normal background variation. Reported cases (${block.cases}) sit close to the ${block.baseline}-case rolling baseline, symptoms are diffuse, and exposure overlap is low \u2014 consistent with ordinary sporadic GI illness rather than a common source.`;
-  }
-  if (block.risk < 60) {
-    return `${block.id} shows a mild uptick above baseline (${block.cases} vs. expected ~${block.baseline}). Not yet clustered enough in symptom type or exposure to call a point-source event, but worth watching over the next reporting cycle.`;
-  }
-  if (block.risk < 80) {
-    return `${block.id} is trending toward a point-source signature: cases are running well above baseline, symptoms are converging on ${block.dominantSymptoms.join(" and ")}, and ${block.exposureOverlap}% of reporters share a recent ${block.foodExposure} exposure within a tight onset window (${block.onsetWindow}).`;
-  }
-  return `${block.id} matches a classic point-source outbreak signature: cases are ${Math.round(block.cases / Math.max(block.baseline, 1))}x baseline, ${block.exposureOverlap}% of reporters share ${block.foodExposure}, symptom profile is tightly clustered around ${block.dominantSymptoms.join(" and ")}, and onset times fall within a narrow ${block.onsetWindow} window \u2014 the pattern a shared contaminated meal produces, not background noise.`;
 }
 
 function KpiCard({ label, value, sub, tone }) {
@@ -211,7 +97,7 @@ function KpiCard({ label, value, sub, tone }) {
 }
 
 function BlockNode({ block, selected, onSelect }) {
-  const st = riskState(block.risk);
+  const st = riskState(block.risk_score);
   const c = COLORS[st.key];
   return (
     <button
@@ -221,12 +107,12 @@ function BlockNode({ block, selected, onSelect }) {
         borderColor: selected ? c.text : c.border,
         boxShadow: selected ? `0 0 0 3px ${c.glow}` : "none",
       }}
-      onClick={() => onSelect(block.id)}
+      onClick={() => onSelect(block.block_id)}
       aria-pressed={selected}
-      title={`${block.id} \u2014 ${st.label}`}
+      title={`${block.block_id} \u2014 ${st.label}`}
     >
-      <span className="block-id">{block.id}</span>
-      <span className="block-cases">{block.cases}</span>
+      <span className="block-id">{block.block_id}</span>
+      <span className="block-cases">{block.current_cases}</span>
       <span className="block-state" style={{ color: c.text }}>{st.label}</span>
     </button>
   );
@@ -242,96 +128,28 @@ function MessNode({ label, sub }) {
   );
 }
 
-function Sparkline({ data, color }) {
-  const w = 640, h = 160, pad = 24;
-  const max = Math.max(...data.map((d) => d.value)) * 1.15;
-  const min = 0;
-  const stepX = (w - pad * 2) / (data.length - 1);
-  const points = data.map((d, i) => {
-    const x = pad + i * stepX;
-    const y = h - pad - ((d.value - min) / (max - min || 1)) * (h - pad * 2);
-    return [x, y];
-  });
-  const path = points.map(([x, y], i) => (i === 0 ? `M${x},${y}` : `L${x},${y}`)).join(" ");
-  const areaPath = `${path} L${points[points.length - 1][0]},${h - pad} L${points[0][0]},${h - pad} Z`;
-  const outbreakStartIdx = data.findIndex((d) => d.marker);
-
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="sparkline" role="img" aria-label="Case trend over the last 10 days">
-      <defs>
-        <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.35" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {[0.25, 0.5, 0.75].map((f) => (
-        <line key={f} x1={pad} x2={w - pad} y1={pad + f * (h - pad * 2)} y2={pad + f * (h - pad * 2)} stroke="#2a2f3a" strokeWidth="1" />
-      ))}
-      <path d={areaPath} fill="url(#trendFill)" stroke="none" />
-      <path d={path} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-      {points.map(([x, y], i) => (
-        <circle key={i} cx={x} cy={y} r={data[i].marker ? 5 : 2.5} fill={data[i].marker ? "#f2606a" : color} stroke="#0d1117" strokeWidth="1" />
-      ))}
-      {outbreakStartIdx >= 0 && (
-        <text x={points[outbreakStartIdx][0]} y={points[outbreakStartIdx][1] - 12} textAnchor="middle" fontSize="10" fill="#f2606a">
-          outbreak onset
-        </text>
-      )}
-      {data.map((d, i) => (
-        i % 2 === 0 && (
-          <text key={i} x={points[i][0]} y={h - 4} textAnchor="middle" fontSize="9" fill="#6b7280">{d.label}</text>
-        )
-      ))}
-    </svg>
-  );
-}
-
-const API_BASE = ""; // e.g. "http://localhost:8000" — leave empty to fall back to demo mode
+// ---------------------------------------------------------------------------
+// Login (staff / clinic role)
+// ---------------------------------------------------------------------------
 
 function LoginGate({ onLogin }) {
-  const [staffId, setStaffId] = useState("");
-  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!staffId.trim() || !password.trim()) {
-      setError("Enter both staff ID and password.");
-      return;
-    }
-    if (password.length < 4) {
-      setError("Password looks too short \u2014 check and try again.");
+    if (!name.trim()) {
+      setError("Enter your name.");
       return;
     }
     setError("");
-
-    if (!API_BASE) {
-      // Demo fallback: no backend configured, sign in locally.
-      onLogin({ staffId: staffId.trim(), role: "Health Desk Staff", token: null });
-      return;
-    }
-
     setLoading(true);
     try {
-      const body = new URLSearchParams();
-      body.set("username", staffId.trim());
-      body.set("password", password);
-      const res = await fetch(`${API_BASE}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-      });
-      if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        setError(detail.detail || "Incorrect staff ID or password.");
-        setLoading(false);
-        return;
-      }
-      const data = await res.json();
-      onLogin({ staffId: data.staff_id, role: data.role, token: data.access_token });
+      const data = await login(name.trim(), "clinic");
+      onLogin({ name: data.name, role: data.role, token: data.session_token });
     } catch (err) {
-      setError("Couldn\u2019t reach the auth server. Check the backend is running.");
+      setError(err.message || "Couldn\u2019t reach the backend. Check it\u2019s running on " + API_BASE);
     } finally {
       setLoading(false);
     }
@@ -342,24 +160,24 @@ function LoginGate({ onLogin }) {
       <div className="login-card">
         <div className="login-mark">\u25C9</div>
         <h1 className="login-title">Hostel Outbreak Radar</h1>
-        <p className="login-sub">Restricted to authorized campus health staff. Sign in to view live block data.</p>
+        <p className="login-sub">Campus health staff sign-in. No password \u2014 this is a hackathon-simple session, see backend/auth.py.</p>
         <form onSubmit={submit}>
-          <label className="login-label" htmlFor="staffId">Staff ID</label>
-          <input id="staffId" className="login-input" value={staffId} onChange={(e) => setStaffId(e.target.value)} placeholder="e.g. HD-0231" autoComplete="username" />
-          <label className="login-label" htmlFor="pw">Password</label>
-          <input id="pw" type="password" className="login-input" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" autoComplete="current-password" />
+          <label className="login-label" htmlFor="staffName">Name</label>
+          <input id="staffName" className="login-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Health Desk Staff" autoComplete="name" />
           {error && <div className="login-error">{error}</div>}
           <button className="login-btn" type="submit" disabled={loading}>{loading ? "Signing in\u2026" : "Sign in"}</button>
         </form>
         <div className="login-foot">
-          {API_BASE
-            ? "Authenticates against the FastAPI /auth/login endpoint (JWT, 8h session)."
-            : "Demo mode \u2014 no backend configured, any staff ID and a 4+ character password signs you in locally."}
+          Authenticates against POST /login and stores the returned session token (sent back as X-Session-Token).
         </div>
       </div>
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Report form (anonymous student role)
+// ---------------------------------------------------------------------------
 
 const SYMPTOM_OPTIONS = ["Nausea", "Vomiting", "Diarrhea", "Abdominal pain", "Fever", "Headache"];
 const SEVERITY_OPTIONS = ["Mild", "Moderate", "Severe"];
@@ -372,8 +190,10 @@ function makeAnonId() {
   return s;
 }
 
-function ReportForm({ apiBase, onBack }) {
+function ReportForm({ onBack }) {
   const [anonId] = useState(makeAnonId);
+  const [studentToken, setStudentToken] = useState(null);
+  const [tokenError, setTokenError] = useState("");
   const [block, setBlock] = useState("");
   const [symptoms, setSymptoms] = useState([]);
   const [severity, setSeverity] = useState("");
@@ -382,6 +202,19 @@ function ReportForm({ apiBase, onBack }) {
   const [errors, setErrors] = useState({});
   const [status, setStatus] = useState("idle"); // idle | loading | success | error
   const [serverError, setServerError] = useState("");
+
+  // POST /reports requires the "student" role (see auth.require_role in
+  // main.py). There's no visible student login screen by design (reports
+  // are anonymous), so we silently open a student session on mount using
+  // the same anonymous id shown to the person, and reuse that token when
+  // the report is actually submitted.
+  useEffect(() => {
+    let cancelled = false;
+    login(anonId, "student")
+      .then((data) => { if (!cancelled) setStudentToken(data.session_token); })
+      .catch((err) => { if (!cancelled) setTokenError(err.message || "Couldn\u2019t reach the backend."); });
+    return () => { cancelled = true; };
+  }, [anonId]);
 
   const toggleSymptom = (s) => {
     setSymptoms((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
@@ -408,6 +241,12 @@ function ReportForm({ apiBase, onBack }) {
     setErrors(e);
     if (Object.keys(e).length > 0) return;
 
+    if (!studentToken) {
+      setServerError(tokenError || "Still establishing a session \u2014 try again in a moment.");
+      setStatus("error");
+      return;
+    }
+
     const payload = {
       anonymous_student_id: anonId,
       block,
@@ -419,28 +258,11 @@ function ReportForm({ apiBase, onBack }) {
 
     setStatus("loading");
     setServerError("");
-
-    if (!apiBase) {
-      await new Promise((r) => setTimeout(r, 600));
-      setStatus("success");
-      return;
-    }
-
     try {
-      const res = await fetch(`${apiBase}/reports`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        setServerError(detail.detail || "The server rejected this report. Check the fields and try again.");
-        setStatus("error");
-        return;
-      }
+      await apiFetch("/reports", { method: "POST", token: studentToken, body: payload });
       setStatus("success");
     } catch (err) {
-      setServerError("Couldn\u2019t reach the server. Check your connection and try again.");
+      setServerError(err.message || "The server rejected this report. Check the fields and try again.");
       setStatus("error");
     }
   };
@@ -570,6 +392,10 @@ function ReportForm({ apiBase, onBack }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Dashboard panels
+// ---------------------------------------------------------------------------
+
 function AdvisoryPanel({ advisories }) {
   return (
     <section className="panel advisory-panel">
@@ -578,7 +404,7 @@ function AdvisoryPanel({ advisories }) {
         <span className="sim-badge">SIMULATED \u2014 no real notification sent</span>
       </div>
       {advisories.length === 0 ? (
-        <div className="empty-state">No block has crossed the PROBABLE threshold (risk \u2265 {ADVISORY_THRESHOLD}). No advisories generated.</div>
+        <div className="empty-state">No block is currently PROBABLE. No advisories generated.</div>
       ) : (
         <ul className="advisory-list">
           {advisories.map((a) => (
@@ -586,11 +412,10 @@ function AdvisoryPanel({ advisories }) {
               <div className="advisory-item-head">
                 <span className="advisory-block">{a.block}</span>
                 <span className="advisory-severity" style={{ color: COLORS.red.text }}>{a.severity}</span>
-                <span className="advisory-time">{formatTimestamp(a.timestamp)}</span>
               </div>
               <p className="advisory-message">{a.message}</p>
               <div className="advisory-meta">
-                <span>{a.targeted} unaffected students targeted</span>
+                <span />
                 <span className="advisory-status">{a.status}</span>
               </div>
             </li>
@@ -605,28 +430,28 @@ function HealthCenterPanel({ alerts }) {
   return (
     <section className="panel healthcenter-panel">
       <div className="panel-head">
-        <h2>Simulated health-center alert</h2>
-        <span className="sim-badge">SIMULATED</span>
+        <h2>Health-center alerts</h2>
+        <span className="sim-badge">from /dashboard/alerts</span>
       </div>
       {alerts.length === 0 ? (
         <div className="empty-state">No active health-center alerts.</div>
       ) : (
         <ul className="hc-list">
           {alerts.map((a) => (
-            <li key={a.id} className="hc-item">
+            <li key={a.block_id} className="hc-item">
               <div className="hc-item-head">
-                <span className="hc-block">{a.block}</span>
-                <span className="hc-time">{formatTimestamp(a.timestamp)}</span>
+                <span className="hc-block">{a.block_id}</span>
+                <span className="hc-time">{riskState(a.risk_score).label}</span>
               </div>
               <div className="hc-grid">
-                <div><span>Case count</span><strong>{a.caseCount}</strong></div>
-                <div><span>Risk score</span><strong>{a.riskScore}</strong></div>
-                <div><span>Suspected exposure</span><strong>{a.suspectedExposure}</strong></div>
+                <div><span>Case count</span><strong>{a.current_cases}</strong></div>
+                <div><span>Risk score</span><strong>{a.risk_score}</strong></div>
+                <div><span>Common exposure</span><strong>{a.common_exposure}</strong></div>
               </div>
               <div className="hc-evidence">
                 <span className="hc-evidence-label">Supporting evidence</span>
                 <ul>
-                  {a.evidence.map((e, i) => <li key={i}>{e}</li>)}
+                  {a.explanation.map((e, i) => <li key={i}>{e}</li>)}
                 </ul>
               </div>
               <div className="hc-foot">This is a statistical signal, not a diagnosis. Individual identities are not included.</div>
@@ -636,36 +461,6 @@ function HealthCenterPanel({ alerts }) {
       )}
     </section>
   );
-}
-
-// Historical entries predate the demo scenario and never change. Live entries
-// are derived from the current block state so the timeline always matches
-// whatever the SIMULATE OUTBREAK / RESET DEMO buttons have produced — no
-// hardcoded block names that could drift out of sync with the scenario data.
-const HISTORICAL_ALERTS = [
-  { time: "Day 6, 12:00", text: "System baseline recalibrated across all 20 blocks", level: "green" },
-  { time: "Day 8, 09:20", text: "G02 flagged WATCH \u2014 mild seasonal uptick, resolved within 48h", level: "yellow" },
-];
-
-function buildTimeline(blocks, demoStage) {
-  if (demoStage === 0) return HISTORICAL_ALERTS;
-  const live = [];
-  // ordered by cluster dominance so the lead block (highest risk) reads first
-  const clusterOrder = Object.keys(OUTBREAK_TARGETS).sort(
-    (a, b) => OUTBREAK_TARGETS[b].risk - OUTBREAK_TARGETS[a].risk
-  );
-  clusterOrder.forEach((id) => {
-    const b = blocks.find((x) => x.id === id);
-    if (!b) return;
-    const st = riskState(b.risk);
-    if (st.key === "green") return;
-    live.push({
-      time: `Live \u00B7 stage ${demoStage}/${DEMO_STAGE_COUNT}`,
-      text: `${id} risk reached ${b.risk} (${st.label}) \u2014 ${b.exposureOverlap}% exposure overlap on ${b.foodExposure}`,
-      level: st.key,
-    });
-  });
-  return [...live, ...HISTORICAL_ALERTS];
 }
 
 function Landing({ onPickStudent, onPickStaff }) {
@@ -684,89 +479,78 @@ function Landing({ onPickStudent, onPickStaff }) {
   );
 }
 
+const POLL_INTERVAL_MS = 20000;
+
 export default function App() {
   const [view, setView] = useState("landing"); // landing | report | login | dashboard
   const [session, setSession] = useState(null);
-  const [baselineBlocks] = useState(buildBaselineBlocks);
-  const [demoStage, setDemoStage] = useState(0); // 0 = baseline, DEMO_STAGE_COUNT = full outbreak
-  const [demoRunning, setDemoRunning] = useState(false);
-  const [selectedId, setSelectedId] = useState(null);
-  const intervalRef = useRef(null);
 
-  const blocks = useMemo(() => applyDemoStage(baselineBlocks, demoStage), [baselineBlocks, demoStage]);
+  const [blocks, setBlocks] = useState([]);
+  const [overview, setOverview] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [loadError, setLoadError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const [selectedId, setSelectedId] = useState(null);
+  const [sourceAttribution, setSourceAttribution] = useState(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
+
+  const loadDashboard = useCallback(async (token) => {
+    setLoading(true);
+    try {
+      const [blocksData, overviewData, alertsData] = await Promise.all([
+        apiFetch("/dashboard/blocks", { token }),
+        apiFetch("/dashboard/overview", { token }),
+        apiFetch("/dashboard/alerts", { token }),
+      ]);
+      setBlocks(blocksData);
+      setOverview(overviewData);
+      setAlerts(alertsData.alerts);
+      setLoadError("");
+    } catch (err) {
+      setLoadError(err.message || "Couldn\u2019t load dashboard data.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, []);
+    if (!session) return;
+    loadDashboard(session.token);
+    const interval = setInterval(() => loadDashboard(session.token), POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [session, loadDashboard]);
 
-  const runSimulation = useCallback(() => {
-    if (demoRunning) return;
-    setDemoRunning(true);
-    setDemoStage(0);
-    setSelectedId(null);
-    let stage = 0;
-    intervalRef.current = setInterval(() => {
-      stage += 1;
-      setDemoStage(stage);
-      if (stage === 1) setSelectedId(OUTBREAK_CLUSTER_BLOCK);
-      if (stage >= DEMO_STAGE_COUNT) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-        setDemoRunning(false);
-      }
-    }, 900);
-  }, [demoRunning]);
+  useEffect(() => {
+    if (!session || !selectedId) { setSourceAttribution(null); return; }
+    let cancelled = false;
+    setSourceLoading(true);
+    apiFetch(`/dashboard/sources?block=${selectedId}`, { token: session.token })
+      .then((data) => { if (!cancelled) setSourceAttribution(data.blocks[0] || null); })
+      .catch(() => { if (!cancelled) setSourceAttribution(null); })
+      .finally(() => { if (!cancelled) setSourceLoading(false); });
+    return () => { cancelled = true; };
+  }, [session, selectedId]);
 
-  const resetDemo = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    setDemoRunning(false);
-    setDemoStage(0);
-    setSelectedId(null);
-  }, []);
-
-  const selected = useMemo(() => blocks.find((b) => b.id === selectedId) || null, [blocks, selectedId]);
-
-  const kpis = useMemo(() => {
-    const activeCases = blocks.reduce((s, b) => s + b.cases, 0);
-    const casesToday = blocks.reduce((s, b) => s + b.casesToday, 0);
-    const highest = blocks.reduce((m, b) => (b.risk > m.risk ? b : m), blocks[0]);
-    const totalBaseline = blocks.reduce((s, b) => s + b.baseline, 0);
-    const deviation = Math.round(((activeCases - totalBaseline) / totalBaseline) * 100);
-    return { activeCases, casesToday, highest, deviation };
-  }, [blocks]);
-
-  const trendData = useMemo(() => {
-    const rand = seededRandom(7);
-    const days = [];
-    for (let i = 1; i <= 10; i++) {
-      let value = Math.round(14 + rand() * 8);
-      if (i >= 8 && demoStage > 0) value = Math.round(30 + (i - 7) * 14 * (demoStage / DEMO_STAGE_COUNT) + rand() * 6);
-      days.push({ label: `D${i}`, value, marker: i === 8 && demoStage > 0 });
-    }
-    return days;
-  }, [demoStage]);
-
+  const selected = useMemo(() => blocks.find((b) => b.block_id === selectedId) || null, [blocks, selectedId]);
   const handleSelect = useCallback((id) => setSelectedId(id), []);
 
-  const advisories = useMemo(() => buildAdvisories(blocks), [blocks]);
-  const healthCenterAlerts = useMemo(() => buildHealthCenterAlerts(blocks), [blocks]);
-  const timeline = useMemo(() => buildTimeline(blocks, demoStage), [blocks, demoStage]);
+  const advisories = useMemo(() => buildAdvisories(alerts), [alerts]);
 
   if (view === "landing") {
     return <Landing onPickStudent={() => setView("report")} onPickStaff={() => setView("login")} />;
   }
   if (view === "report") {
-    return <ReportForm apiBase={API_BASE} onBack={() => setView("landing")} />;
+    return <ReportForm onBack={() => setView("landing")} />;
   }
   if (!session) {
     return <LoginGate onLogin={(s) => { setSession(s); setView("dashboard"); }} />;
   }
 
-  const st = selected ? riskState(selected.risk) : null;
+  const st = selected ? riskState(selected.risk_score) : null;
   const c = st ? COLORS[st.key] : null;
+  const boysBlocks = blocks.filter((b) => b.gender === "boys");
+  const girlsBlocks = blocks.filter((b) => b.gender === "girls");
 
   return (
     <div className="app">
@@ -774,31 +558,38 @@ export default function App() {
         <div className="topbar-left">
           <span className="topbar-mark">\u25C9</span>
           <span className="topbar-title">HOSTEL OUTBREAK RADAR</span>
-          <span className="topbar-pill">LIVE \u2014 MOCK DATA</span>
+          <span className="topbar-pill">{loading ? "REFRESHING\u2026" : "LIVE"}</span>
         </div>
         <div className="topbar-right">
-          <button className="demo-btn demo-btn--simulate" onClick={runSimulation} disabled={demoRunning}>
-            {demoRunning ? `Simulating\u2026 stage ${demoStage}/${DEMO_STAGE_COUNT}` : "Simulate outbreak"}
+          <button className="demo-btn demo-btn--reset" onClick={() => loadDashboard(session.token)} disabled={loading}>
+            Refresh now
           </button>
-          <button className="demo-btn demo-btn--reset" onClick={resetDemo}>Reset demo</button>
-          <span className="session-info">{session.staffId} \u00B7 {session.role}</span>
+          <span className="session-info">{session.name} \u00B7 {session.role}</span>
           <button className="logout-btn" onClick={() => { setSession(null); setView("landing"); }}>Sign out</button>
         </div>
       </header>
 
-      {demoStage > 0 && (
-        <div className="demo-banner">
-          Demo simulation {demoRunning ? "running" : "complete"} \u2014 stage {demoStage}/{DEMO_STAGE_COUNT} \u2014 all figures are synthetic demonstration data.
-        </div>
-      )}
+      {loadError && <div className="demo-banner">{loadError}</div>}
 
       <main className="grid">
-        <section className="kpi-row">
-          <KpiCard label="Active cases" value={kpis.activeCases} sub="across 20 blocks" />
-          <KpiCard label="Cases today" value={kpis.casesToday} sub="new reports, 24h" />
-          <KpiCard label="Highest risk" value={`${kpis.highest.id} \u00B7 ${kpis.highest.risk}`} sub={riskState(kpis.highest.risk).label} tone={COLORS[riskState(kpis.highest.risk).key].text} />
-          <KpiCard label="Baseline deviation" value={`${kpis.deviation > 0 ? "+" : ""}${kpis.deviation}%`} sub="vs. rolling baseline" tone={kpis.deviation > 30 ? COLORS.red.text : undefined} />
-        </section>
+        {overview && (
+          <section className="kpi-row">
+            <KpiCard label="Active cases" value={overview.total_active_cases} sub="across 20 blocks" />
+            <KpiCard label="Cases today" value={overview.cases_today} sub="most recent reporting date" />
+            <KpiCard
+              label="Highest risk"
+              value={overview.highest_risk_block ? `${overview.highest_risk_block.block_id} \u00B7 ${overview.highest_risk_block.risk_score}` : "\u2014"}
+              sub={overview.highest_risk_block ? overview.highest_risk_block.severity : "no active risk"}
+              tone={overview.highest_risk_block ? COLORS[riskState(overview.highest_risk_block.risk_score).key].text : undefined}
+            />
+            <KpiCard
+              label="Baseline deviation"
+              value={`${overview.baseline_deviation_pct > 0 ? "+" : ""}${overview.baseline_deviation_pct}%`}
+              sub="vs. rolling baseline"
+              tone={overview.baseline_deviation_pct > 30 ? COLORS.red.text : undefined}
+            />
+          </section>
+        )}
 
         <section className="panel radar-panel">
           <div className="panel-head">
@@ -814,8 +605,8 @@ export default function App() {
             <div className="wing">
               <div className="wing-label">Boys hostels</div>
               <div className="block-grid block-grid--boys">
-                {blocks.filter((b) => b.wing === "Boys").map((b) => (
-                  <BlockNode key={b.id} block={b} selected={b.id === selectedId} onSelect={handleSelect} />
+                {boysBlocks.map((b) => (
+                  <BlockNode key={b.block_id} block={b} selected={b.block_id === selectedId} onSelect={handleSelect} />
                 ))}
               </div>
             </div>
@@ -829,8 +620,8 @@ export default function App() {
             <div className="wing">
               <div className="wing-label">Girls hostels</div>
               <div className="block-grid block-grid--girls">
-                {blocks.filter((b) => b.wing === "Girls").map((b) => (
-                  <BlockNode key={b.id} block={b} selected={b.id === selectedId} onSelect={handleSelect} />
+                {girlsBlocks.map((b) => (
+                  <BlockNode key={b.block_id} block={b} selected={b.block_id === selectedId} onSelect={handleSelect} />
                 ))}
               </div>
             </div>
@@ -846,22 +637,21 @@ export default function App() {
             <div className="detail-body">
               <div className="detail-top" style={{ borderColor: c.border }}>
                 <div>
-                  <div className="detail-block-id">{selected.id}</div>
-                  <div className="detail-block-wing">{selected.wing} hostel</div>
+                  <div className="detail-block-id">{selected.block_id}</div>
+                  <div className="detail-block-wing">{selected.gender === "boys" ? "Boys" : "Girls"} hostel</div>
                 </div>
                 <div className="detail-risk" style={{ color: c.text }}>
-                  <div className="detail-risk-score">{selected.risk}</div>
+                  <div className="detail-risk-score">{selected.risk_score}</div>
                   <div className="detail-risk-label">{st.label}</div>
                 </div>
               </div>
               <div className="detail-grid">
-                <div className="detail-item"><span>Reported cases</span><strong>{selected.cases}</strong></div>
-                <div className="detail-item"><span>Cases today</span><strong>{selected.casesToday}</strong></div>
-                <div className="detail-item"><span>Baseline</span><strong>{selected.baseline}</strong></div>
-                <div className="detail-item"><span>Exposure overlap</span><strong>{selected.exposureOverlap}%</strong></div>
-                <div className="detail-item detail-item--wide"><span>Dominant symptoms</span><strong>{selected.dominantSymptoms.join(", ")}</strong></div>
-                <div className="detail-item detail-item--wide"><span>Common food exposure</span><strong>{selected.foodExposure}</strong></div>
-                <div className="detail-item detail-item--wide"><span>Onset window</span><strong>{selected.onsetWindow}</strong></div>
+                <div className="detail-item"><span>Reported cases</span><strong>{selected.current_cases}</strong></div>
+                <div className="detail-item"><span>Baseline</span><strong>{selected.baseline_cases}</strong></div>
+                <div className="detail-item"><span>Growth factor</span><strong>{selected.trend.growth_factor}x</strong></div>
+                <div className="detail-item"><span>Trend</span><strong>{selected.trend.description}</strong></div>
+                <div className="detail-item detail-item--wide"><span>Dominant symptoms</span><strong>{selected.dominant_symptoms.join(", ") || "\u2014"}</strong></div>
+                <div className="detail-item detail-item--wide"><span>Common food exposure</span><strong>{selected.common_exposure}</strong></div>
               </div>
             </div>
           ) : (
@@ -871,47 +661,65 @@ export default function App() {
 
         <section className="panel explain-panel">
           <div className="panel-head"><h2>Outbreak risk explanation</h2></div>
-          <p className="explain-text">{selected ? explainRisk(selected) : "Select a block to see why it is or isn\u2019t flagged."}</p>
+          {selected ? (
+            selected.explanation.length > 0 ? (
+              <ul className="timeline">
+                {selected.explanation.map((reason, i) => (
+                  <li key={i} className="timeline-item">
+                    <span className="timeline-dot" style={{ background: c.text }} />
+                    <div className="timeline-text">{reason}</div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="explain-text">No specific risk factors flagged for this block.</p>
+            )
+          ) : (
+            <p className="explain-text">Select a block to see why it is or isn\u2019t flagged.</p>
+          )}
         </section>
 
         <section className="panel source-panel">
           <div className="panel-head"><h2>Source attribution</h2></div>
-          {selected ? (
+          {!selected ? (
+            <div className="empty-state">No block selected.</div>
+          ) : sourceLoading ? (
+            <div className="empty-state">Running attribution\u2026</div>
+          ) : sourceAttribution && sourceAttribution.top_suspected_exposure ? (
             <div className="source-body">
               <div className="source-row">
                 <span>Likely source</span>
-                <strong>{selected.foodExposure}</strong>
+                <strong>{sourceAttribution.top_suspected_exposure.exposure}</strong>
               </div>
               <div className="source-bar-wrap">
                 <div className="source-bar-track">
-                  <div className="source-bar-fill" style={{ width: `${selected.exposureOverlap}%`, background: c.text }} />
+                  <div
+                    className="source-bar-fill"
+                    style={{ width: `${sourceAttribution.top_suspected_exposure.affected_exposure_pct}%`, background: c.text }}
+                  />
                 </div>
-                <span className="source-bar-label">{selected.exposureOverlap}% of reporters in {selected.id} share this exposure</span>
+                <span className="source-bar-label">
+                  {sourceAttribution.top_suspected_exposure.affected_exposure_pct}% of affected reporters in {selected.block_id} were exposed \u2014 association: {sourceAttribution.top_suspected_exposure.association}
+                </span>
               </div>
-              <div className="source-note">Attribution is exposure-overlap based, not confirmed \u2014 use for triage priority, not diagnosis.</div>
+              <div className="source-note">{sourceAttribution.disclaimer}</div>
             </div>
           ) : (
-            <div className="empty-state">No block selected.</div>
+            <div className="empty-state">No strong source association found for this block.</div>
           )}
         </section>
 
-        <section className="panel trend-panel">
-          <div className="panel-head"><h2>Case trend \u2014 last 10 days</h2></div>
-          <Sparkline data={trendData} color="#5b8cf0" />
-        </section>
-
         <section className="panel timeline-panel">
-          <div className="panel-head"><h2>Alert timeline</h2></div>
-          {timeline.length === 0 ? (
+          <div className="panel-head"><h2>Active alerts</h2></div>
+          {alerts.length === 0 ? (
             <div className="empty-state">No alerts yet.</div>
           ) : (
             <ul className="timeline">
-              {timeline.map((a, i) => (
-                <li key={i} className="timeline-item">
-                  <span className="timeline-dot" style={{ background: COLORS[a.level].text }} />
+              {alerts.map((a) => (
+                <li key={a.block_id} className="timeline-item">
+                  <span className="timeline-dot" style={{ background: COLORS[riskState(a.risk_score).key].text }} />
                   <div>
-                    <div className="timeline-text">{a.text}</div>
-                    <div className="timeline-time">{a.time}</div>
+                    <div className="timeline-text">{a.block_id} risk reached {a.risk_score} ({riskState(a.risk_score).label}) \u2014 common exposure {a.common_exposure}</div>
                   </div>
                 </li>
               ))}
@@ -920,7 +728,7 @@ export default function App() {
         </section>
 
         <AdvisoryPanel advisories={advisories} />
-        <HealthCenterPanel alerts={healthCenterAlerts} />
+        <HealthCenterPanel alerts={alerts} />
 
       </main>
 
@@ -962,15 +770,13 @@ export default function App() {
           font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 8px; cursor: pointer;
           font-family: inherit; border: 1px solid transparent;
         }
-        .demo-btn--simulate { background: #f0954a; color: #2e1c0f; }
-        .demo-btn--simulate:hover { background: #f5a866; }
-        .demo-btn--simulate:disabled { opacity: 0.7; cursor: not-allowed; }
         .demo-btn--reset { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.12); color: #cdd3e0; }
         .demo-btn--reset:hover { background: rgba(255,255,255,0.1); }
+        .demo-btn--reset:disabled { opacity: 0.6; cursor: not-allowed; }
 
         .demo-banner {
-          text-align: center; font-size: 11.5px; color: #f0954a; background: rgba(240,149,74,0.08);
-          border-bottom: 1px solid rgba(240,149,74,0.2); padding: 6px 12px; letter-spacing: 0.02em;
+          text-align: center; font-size: 11.5px; color: #f2606a; background: rgba(242,96,106,0.08);
+          border-bottom: 1px solid rgba(242,96,106,0.2); padding: 6px 12px; letter-spacing: 0.02em;
         }
 
         .grid {
@@ -1053,8 +859,6 @@ export default function App() {
         .source-bar-label { font-size: 11px; color: #8b93a5; display: block; margin-top: 6px; }
         .source-note { font-size: 11px; color: #5a6070; margin-top: 14px; font-style: italic; }
 
-        .trend-panel { grid-column: 1 / 2; }
-        .sparkline { width: 100%; height: auto; }
         .advisory-panel, .healthcenter-panel { grid-column: 1 / -1; }
 
         .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
@@ -1178,7 +982,6 @@ export default function App() {
         .advisory-item-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
         .advisory-block { font-size: 13px; font-weight: 700; color: #eef0f5; }
         .advisory-severity { font-size: 10.5px; letter-spacing: 0.05em; font-weight: 600; }
-        .advisory-time { font-size: 11px; color: #6b7280; margin-left: auto; }
         .advisory-message { font-size: 12.5px; color: #c3c8d4; line-height: 1.55; margin: 0 0 10px; }
         .advisory-meta { display: flex; justify-content: space-between; font-size: 11px; color: #8b93a5; }
         .advisory-status { color: #f0954a; font-weight: 600; letter-spacing: 0.04em; }

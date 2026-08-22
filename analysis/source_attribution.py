@@ -138,6 +138,22 @@ class ExposureStats:
 # Data loading
 # ---------------------------------------------------------------------------
 
+# meals.csv only records a `date` (day-level) plus a `meal_type` label, not
+# an actual serving clock-time. To compute a meaningful onset-gap-in-hours
+# for temporal compatibility, we anchor each meal_type to the midpoint of
+# its typical serving window (matches data/generate_data.py's
+# MEAL_TIME_WINDOWS) rather than defaulting to midnight - a dinner and a
+# breakfast on the same day are otherwise indistinguishable, which silently
+# corrupts every onset-gap calculation by up to ~20 hours.
+MEAL_TYPE_CLOCK_TIME = {
+    "breakfast": "08:00:00",
+    "lunch": "13:00:00",
+    "snacks": "17:00:00",
+    "dinner": "20:00:00",
+}
+DEFAULT_MEAL_CLOCK_TIME = "12:00:00"  # fallback for any unrecognized meal_type
+
+
 def load_reports(csv_path: str) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     df["onset_time"] = pd.to_datetime(df["onset_time"], format="ISO8601")
@@ -146,8 +162,18 @@ def load_reports(csv_path: str) -> pd.DataFrame:
 
 def load_meals(csv_path: str) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
-    df["datetime"] = pd.to_datetime(df["date"])
+    df["datetime"] = _meal_datetime(df)
     return df
+
+
+def _meal_datetime(meals_df: pd.DataFrame) -> pd.Series:
+    """
+    Build an actual serving datetime per meal record: `date` + a clock time
+    derived from `meal_type` (see MEAL_TYPE_CLOCK_TIME), instead of
+    collapsing every meal on a given day to midnight.
+    """
+    clock_times = meals_df["meal_type"].map(MEAL_TYPE_CLOCK_TIME).fillna(DEFAULT_MEAL_CLOCK_TIME)
+    return pd.to_datetime(meals_df["date"].astype(str) + " " + clock_times)
 
 
 # ---------------------------------------------------------------------------

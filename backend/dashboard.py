@@ -19,9 +19,10 @@ hackathon skeleton.
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 import analysis_bridge
+import auth
 from dashboard_models import (
     Alert,
     BlockRisk,
@@ -36,7 +37,14 @@ from dashboard_models import (
 )
 from schema import ALL_BLOCKS
 
-router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+# Clinic-only: every /dashboard/* route requires a logged-in clinic session.
+# Applied at the router level so new routes are protected by default rather
+# than needing to remember the dependency on each new endpoint.
+router = APIRouter(
+    prefix="/dashboard",
+    tags=["dashboard"],
+    dependencies=[Depends(auth.require_role("clinic"))],
+)
 
 FLAGGED_SEVERITIES = ("WATCH", "SUSPECTED", "PROBABLE")
 ALERT_SEVERITIES = ("WATCH", "SUSPECTED", "PROBABLE")
