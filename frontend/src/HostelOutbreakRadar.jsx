@@ -107,7 +107,7 @@ function BlockNode({ block, selected, onSelect }) {
       }}
       onClick={() => onSelect(block.block_id)}
       aria-pressed={selected}
-      title={`${block.block_id} \u2014 ${st.label}`}
+      title={`${block.block_id} — ${st.label}`}
     >
       <span className="block-id">{block.block_id}</span>
       <span className="block-cases">{block.current_cases}</span>
@@ -119,7 +119,7 @@ function BlockNode({ block, selected, onSelect }) {
 function MessNode({ label, sub }) {
   return (
     <div className="mess-node">
-      <div className="mess-icon">\u2622</div>
+      <div className="mess-icon">☢</div>
       <div className="mess-label">{label}</div>
       <div className="mess-sub">{sub}</div>
     </div>
@@ -147,7 +147,7 @@ function LoginGate({ onLogin }) {
       const data = await login(name.trim(), "clinic");
       onLogin({ name: data.name, role: data.role, token: data.session_token });
     } catch (err) {
-      setError(err.message || "Couldn\u2019t reach the backend. Check it\u2019s running on " + API_BASE);
+      setError(err.message || "Couldn’t reach the backend. Check it’s running on " + API_BASE);
     } finally {
       setLoading(false);
     }
@@ -156,14 +156,14 @@ function LoginGate({ onLogin }) {
   return (
     <div className="login-wrap">
       <div className="login-card">
-        <div className="login-mark">\u25C9</div>
+        <div className="login-mark">◉</div>
         <h1 className="login-title">Hostel Outbreak Radar</h1>
-        <p className="login-sub">Campus health staff sign-in. No password \u2014 this is a hackathon-simple session, see backend/auth.py.</p>
+        <p className="login-sub">Campus health staff sign-in. No password — this is a hackathon-simple session, see backend/auth.py.</p>
         <form onSubmit={submit}>
           <label className="login-label" htmlFor="staffName">Name</label>
           <input id="staffName" className="login-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Health Desk Staff" autoComplete="name" />
           {error && <div className="login-error">{error}</div>}
-          <button className="login-btn" type="submit" disabled={loading}>{loading ? "Signing in\u2026" : "Sign in"}</button>
+          <button className="login-btn" type="submit" disabled={loading}>{loading ? "Signing in…" : "Sign in"}</button>
         </form>
         <div className="login-foot">
           Authenticates against POST /login and stores the returned session token (sent back as X-Session-Token).
@@ -210,7 +210,7 @@ function ReportForm({ onBack }) {
     let cancelled = false;
     login(anonId, "student")
       .then((data) => { if (!cancelled) setStudentToken(data.session_token); })
-      .catch((err) => { if (!cancelled) setTokenError(err.message || "Couldn\u2019t reach the backend."); });
+      .catch((err) => { if (!cancelled) setTokenError(err.message || "Couldn’t reach the backend."); });
     return () => { cancelled = true; };
   }, [anonId]);
 
@@ -227,7 +227,7 @@ function ReportForm({ onBack }) {
     else {
       const onsetDate = new Date(onsetTime);
       if (isNaN(onsetDate.getTime())) e.onsetTime = "Enter a valid date and time.";
-      else if (onsetDate.getTime() > Date.now() + 5 * 60000) e.onsetTime = "Onset time can\u2019t be in the future.";
+      else if (onsetDate.getTime() > Date.now() + 5 * 60000) e.onsetTime = "Onset time can’t be in the future.";
     }
     if (!foodExposure) e.foodExposure = "Select a recent food exposure.";
     return e;
@@ -240,7 +240,7 @@ function ReportForm({ onBack }) {
     if (Object.keys(e).length > 0) return;
 
     if (!studentToken) {
-      setServerError(tokenError || "Still establishing a session \u2014 try again in a moment.");
+      setServerError(tokenError || "Still establishing a session — try again in a moment.");
       setStatus("error");
       return;
     }
@@ -280,9 +280,9 @@ function ReportForm({ onBack }) {
     return (
       <div className="report-wrap">
         <div className="report-card report-card--success">
-          <div className="success-icon">\u2713</div>
+          <div className="success-icon">✓</div>
           <h1 className="report-title">Report received</h1>
-          <p className="report-sub">Thanks \u2014 your symptom report has been logged anonymously. No further action needed. If symptoms worsen, contact the campus health center directly.</p>
+          <p className="report-sub">Thanks — your symptom report has been logged anonymously. No further action needed. If symptoms worsen, contact the campus health center directly.</p>
           <button className="report-btn" onClick={resetForm}>Submit another report</button>
           {onBack && <button className="report-link" onClick={onBack}>Back</button>}
         </div>
@@ -381,7 +381,7 @@ function ReportForm({ onBack }) {
           {status === "error" && <div className="submit-error">{serverError}</div>}
 
           <button className="report-btn" type="submit" disabled={status === "loading"}>
-            {status === "loading" ? "Submitting\u2026" : "Submit report"}
+            {status === "loading" ? "Submitting…" : "Submit report"}
           </button>
           {onBack && <button type="button" className="report-link" onClick={onBack}>Back</button>}
         </form>
@@ -399,7 +399,7 @@ function AdvisoryPanel({ advisories }) {
     <section className="panel advisory-panel">
       <div className="panel-head">
         <h2>Simulated resident advisories</h2>
-        <span className="sim-badge">SIMULATED \u2014 no real notification sent</span>
+        <span className="sim-badge">SIMULATED — no real notification sent</span>
       </div>
       {advisories.length === 0 ? (
         <div className="empty-state">No block is currently PROBABLE. No advisories generated.</div>
@@ -465,9 +465,9 @@ function Landing({ onPickStudent, onPickStaff }) {
   return (
     <div className="login-wrap">
       <div className="login-card">
-        <div className="login-mark">\u25C9</div>
+        <div className="login-mark">◉</div>
         <h1 className="login-title">Hostel Outbreak Radar</h1>
-        <p className="login-sub">Choose how you\u2019d like to continue.</p>
+        <p className="login-sub">Choose how you’d like to continue.</p>
         <button className="report-btn" onClick={onPickStudent}>Report symptoms (student, anonymous)</button>
         <button className="login-btn" style={{ marginTop: 10, background: "transparent", color: "#cdd3e0", border: "1px solid rgba(255,255,255,0.15)" }} onClick={onPickStaff}>
           Staff sign-in
@@ -506,7 +506,7 @@ export default function App() {
       setAlerts(alertsData.alerts);
       setLoadError("");
     } catch (err) {
-      setLoadError(err.message || "Couldn\u2019t load dashboard data.");
+      setLoadError(err.message || "Couldn’t load dashboard data.");
     } finally {
       setLoading(false);
     }
@@ -536,13 +536,28 @@ export default function App() {
   const advisories = useMemo(() => buildAdvisories(alerts), [alerts]);
 
   if (view === "landing") {
-    return <Landing onPickStudent={() => setView("report")} onPickStaff={() => setView("login")} />;
+    return (
+      <>
+        <GlobalStyles />
+        <Landing onPickStudent={() => setView("report")} onPickStaff={() => setView("login")} />
+      </>
+    );
   }
   if (view === "report") {
-    return <ReportForm onBack={() => setView("landing")} />;
+    return (
+      <>
+        <GlobalStyles />
+        <ReportForm onBack={() => setView("landing")} />
+      </>
+    );
   }
   if (!session) {
-    return <LoginGate onLogin={(s) => { setSession(s); setView("dashboard"); }} />;
+    return (
+      <>
+        <GlobalStyles />
+        <LoginGate onLogin={(s) => { setSession(s); setView("dashboard"); }} />
+      </>
+    );
   }
 
   const st = selected ? riskState(selected.risk_score) : null;
@@ -552,17 +567,18 @@ export default function App() {
 
   return (
     <div className="app">
+      <GlobalStyles />
       <header className="topbar">
         <div className="topbar-left">
-          <span className="topbar-mark">\u25C9</span>
+          <span className="topbar-mark">◉</span>
           <span className="topbar-title">HOSTEL OUTBREAK RADAR</span>
-          <span className="topbar-pill">{loading ? "REFRESHING\u2026" : "LIVE"}</span>
+          <span className="topbar-pill">{loading ? "REFRESHING…" : "LIVE"}</span>
         </div>
         <div className="topbar-right">
           <button className="demo-btn demo-btn--reset" onClick={() => loadDashboard(session.token)} disabled={loading}>
             Refresh now
           </button>
-          <span className="session-info">{session.name} \u00B7 {session.role}</span>
+          <span className="session-info">{session.name} · {session.role}</span>
           <button className="logout-btn" onClick={() => { setSession(null); setView("landing"); }}>Sign out</button>
         </div>
       </header>
@@ -576,7 +592,7 @@ export default function App() {
             <KpiCard label="Cases today" value={overview.cases_today} sub="most recent reporting date" />
             <KpiCard
               label="Highest risk"
-              value={overview.highest_risk_block ? `${overview.highest_risk_block.block_id} \u00B7 ${overview.highest_risk_block.risk_score}` : "\u2014"}
+              value={overview.highest_risk_block ? `${overview.highest_risk_block.block_id} · ${overview.highest_risk_block.risk_score}` : "—"}
               sub={overview.highest_risk_block ? overview.highest_risk_block.severity : "no active risk"}
               tone={overview.highest_risk_block ? COLORS[riskState(overview.highest_risk_block.risk_score).key].text : undefined}
             />
@@ -624,7 +640,7 @@ export default function App() {
               </div>
             </div>
           </div>
-          <div className="radar-foot">Schematic layout \u2014 not geographic. Block position and spacing are illustrative only.</div>
+          <div className="radar-foot">Schematic layout — not geographic. Block position and spacing are illustrative only.</div>
         </section>
 
         <section className="panel detail-panel">
@@ -648,7 +664,7 @@ export default function App() {
                 <div className="detail-item"><span>Baseline</span><strong>{selected.baseline_cases}</strong></div>
                 <div className="detail-item"><span>Growth factor</span><strong>{selected.trend.growth_factor}x</strong></div>
                 <div className="detail-item"><span>Trend</span><strong>{selected.trend.description}</strong></div>
-                <div className="detail-item detail-item--wide"><span>Dominant symptoms</span><strong>{selected.dominant_symptoms.join(", ") || "\u2014"}</strong></div>
+                <div className="detail-item detail-item--wide"><span>Dominant symptoms</span><strong>{selected.dominant_symptoms.join(", ") || "—"}</strong></div>
                 <div className="detail-item detail-item--wide"><span>Common food exposure</span><strong>{selected.common_exposure}</strong></div>
               </div>
             </div>
@@ -673,7 +689,7 @@ export default function App() {
               <p className="explain-text">No specific risk factors flagged for this block.</p>
             )
           ) : (
-            <p className="explain-text">Select a block to see why it is or isn\u2019t flagged.</p>
+            <p className="explain-text">Select a block to see why it is or isn’t flagged.</p>
           )}
         </section>
 
@@ -682,7 +698,7 @@ export default function App() {
           {!selected ? (
             <div className="empty-state">No block selected.</div>
           ) : sourceLoading ? (
-            <div className="empty-state">Running attribution\u2026</div>
+            <div className="empty-state">Running attribution…</div>
           ) : sourceAttribution && sourceAttribution.top_suspected_exposure ? (
             <div className="source-body">
               <div className="source-row">
@@ -697,7 +713,7 @@ export default function App() {
                   />
                 </div>
                 <span className="source-bar-label">
-                  {sourceAttribution.top_suspected_exposure.affected_exposure_pct}% of affected reporters in {selected.block_id} were exposed \u2014 association: {sourceAttribution.top_suspected_exposure.association}
+                  {sourceAttribution.top_suspected_exposure.affected_exposure_pct}% of affected reporters in {selected.block_id} were exposed — association: {sourceAttribution.top_suspected_exposure.association}
                 </span>
               </div>
               <div className="source-note">{sourceAttribution.disclaimer}</div>
@@ -717,7 +733,7 @@ export default function App() {
                 <li key={a.block_id} className="timeline-item">
                   <span className="timeline-dot" style={{ background: COLORS[riskState(a.risk_score).key].text }} />
                   <div>
-                    <div className="timeline-text">{a.block_id} risk reached {a.risk_score} ({riskState(a.risk_score).label}) \u2014 common exposure {a.common_exposure}</div>
+                    <div className="timeline-text">{a.block_id} risk reached {a.risk_score} ({riskState(a.risk_score).label}) — common exposure {a.common_exposure}</div>
                   </div>
                 </li>
               ))}
@@ -730,7 +746,13 @@ export default function App() {
 
       </main>
 
-      <style>{`
+    </div>
+  );
+}
+
+function GlobalStyles() {
+  return (
+    <style>{`
         * { box-sizing: border-box; }
         .app {
           min-height: 100vh;
@@ -996,7 +1018,6 @@ export default function App() {
         .hc-evidence ul { margin: 6px 0 0; padding-left: 16px; }
         .hc-evidence li { font-size: 12px; color: #c3c8d4; line-height: 1.6; }
         .hc-foot { font-size: 10.5px; color: #5a6070; font-style: italic; margin-top: 10px; }
-      `}</style>
-    </div>
+    `}</style>
   );
 }
